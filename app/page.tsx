@@ -17,6 +17,7 @@ type Particle = Point & {
 };
 type Impact = Point & { life: number; maxLife: number };
 type PopText = Point & { life: number; text: string };
+type Slash = Point & { angle: number; life: number; maxLife: number };
 
 type Game = {
   status: GameStatus;
@@ -26,6 +27,7 @@ type Game = {
   particles: Particle[];
   impacts: Impact[];
   popTexts: PopText[];
+  slashes: Slash[];
   score: number;
   best: number;
   combo: number;
@@ -115,6 +117,7 @@ function initialGame(best: number): Game {
     particles: [],
     impacts: [],
     popTexts: [],
+    slashes: [],
     score: 0,
     best,
     combo: 1,
@@ -282,6 +285,13 @@ export default function Home() {
       burst(enemy.x, enemy.y, "#ff4e68", 18, 280);
       burst(enemy.x, enemy.y, "#f2ecd8", 7, 170);
       game.impacts.push({ x: enemy.x, y: enemy.y, life: 0.34, maxLife: 0.34 });
+      game.slashes.push({
+        x: enemy.x,
+        y: enemy.y,
+        angle: Math.atan2(enemy.y - game.player.y, enemy.x - game.player.x),
+        life: 0.3,
+        maxLife: 0.3,
+      });
       game.popTexts.push({ x: enemy.x, y: enemy.y - 22, life: 0.72, text: `+${points}` });
       game.score += points;
       game.combo = Math.min(9, game.combo + 1);
@@ -428,6 +438,8 @@ export default function Home() {
         pop.y -= 46 * dt;
       });
       game.popTexts = game.popTexts.filter((pop) => pop.life > 0);
+      game.slashes.forEach((slash) => { slash.life -= dt; });
+      game.slashes = game.slashes.filter((slash) => slash.life > 0);
     };
 
     const roundedRect = (
@@ -568,6 +580,43 @@ export default function Home() {
         ctx.restore();
       });
 
+      game.slashes.forEach((slash) => {
+        const progress = 1 - slash.life / slash.maxLife;
+        const alpha = 1 - progress;
+        ctx.save();
+        ctx.translate(slash.x, slash.y);
+        ctx.rotate(slash.angle);
+        ctx.scale(0.82 + progress * 0.62, 0.82 + progress * 0.62);
+        ctx.globalAlpha = alpha;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "rgba(255,78,104,.8)";
+        ctx.lineWidth = 19;
+        ctx.beginPath();
+        ctx.moveTo(-42, -46);
+        ctx.quadraticCurveTo(40, 0, -42, 46);
+        ctx.stroke();
+        ctx.strokeStyle = "#f2ecd8";
+        ctx.lineWidth = 11;
+        ctx.beginPath();
+        ctx.moveTo(-42, -46);
+        ctx.quadraticCurveTo(40, 0, -42, 46);
+        ctx.stroke();
+        ctx.strokeStyle = "#2df4e6";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(-42, -46);
+        ctx.quadraticCurveTo(40, 0, -42, 46);
+        ctx.stroke();
+        ctx.fillStyle = "#f7f047";
+        ctx.beginPath();
+        ctx.moveTo(42, 0);
+        ctx.lineTo(55, -5);
+        ctx.lineTo(49, 7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      });
+
       game.popTexts.forEach((pop) => {
         ctx.save();
         ctx.translate(pop.x, pop.y);
@@ -651,6 +700,90 @@ export default function Home() {
         ctx.beginPath();
         ctx.arc(1, 8, 4.5, 0, Math.PI * 2);
         ctx.fill();
+
+        const bagWarning = game.fever > 0 && game.fever <= 1.5;
+        const bagPulse = bagWarning && Math.floor(game.elapsed * 14) % 2 === 0;
+        const bagCharge = game.fever > 0 ? 1 : game.light / 100;
+        const bagX = -player.faceY * 20 - player.faceX * 9;
+        const bagY = player.faceX * 20 - player.faceY * 9;
+        ctx.save();
+        ctx.translate(bagX, bagY);
+        if (game.fever > 0) {
+          ctx.globalAlpha = bagPulse ? 0.95 : 0.42;
+          ctx.fillStyle = bagPulse ? "#ff4e68" : "#f7f047";
+          ctx.beginPath();
+          ctx.arc(0, 0, bagPulse ? 23 : 17, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+        ctx.strokeStyle = "#09090b";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(0, -7, 9, Math.PI, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "#f2ecd8";
+        ctx.strokeStyle = "#09090b";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.roundRect(-11, -5, 22, 24, 5);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = bagPulse ? "#ff4e68" : "#f7f047";
+        ctx.fillRect(-6, 13 - bagCharge * 13, 12, 4 + bagCharge * 13);
+        ctx.restore();
+
+        const swordAngle = Math.atan2(player.faceY, player.faceX);
+        ctx.save();
+        ctx.rotate(swordAngle);
+        ctx.translate(game.dashTime > 0 ? 22 : 17, 7);
+        if (game.dashTime > 0) {
+          ctx.shadowColor = "#2df4e6";
+          ctx.shadowBlur = 18;
+        }
+        ctx.strokeStyle = "#09090b";
+        ctx.lineWidth = 9;
+        ctx.beginPath();
+        ctx.moveTo(-6, 0);
+        ctx.lineTo(18, 0);
+        ctx.stroke();
+        ctx.strokeStyle = "#ff4e68";
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(-5, 0);
+        ctx.lineTo(18, 0);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = "#09090b";
+        ctx.lineWidth = 7;
+        ctx.beginPath();
+        ctx.moveTo(18, -12);
+        ctx.lineTo(18, 12);
+        ctx.stroke();
+        ctx.strokeStyle = "#f7f047";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(18, -11);
+        ctx.lineTo(18, 11);
+        ctx.stroke();
+        ctx.fillStyle = "#f2ecd8";
+        ctx.strokeStyle = "#09090b";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(20, -6);
+        ctx.lineTo(game.dashTime > 0 ? 70 : 57, -3);
+        ctx.lineTo(game.dashTime > 0 ? 82 : 67, 0);
+        ctx.lineTo(game.dashTime > 0 ? 70 : 57, 6);
+        ctx.lineTo(20, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.strokeStyle = "#2df4e6";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(25, -2);
+        ctx.lineTo(game.dashTime > 0 ? 71 : 58, 0);
+        ctx.stroke();
+        ctx.restore();
         ctx.restore();
       }
 
@@ -733,7 +866,7 @@ export default function Home() {
       ? `本轮 ${ui.score.toLocaleString("zh-CN")} 分，最高 ${ui.best.toLocaleString("zh-CN")} 分`
       : ui.status === "paused"
         ? "影子也暂停了。按 P 或继续按钮返回。"
-        : "捡光点填满灯袋。冲刺时撞碎影子，连续击碎会提高倍率。";
+        : "捡光点填满灯袋。冲刺会挥剑斩碎影子，连续击杀会提高倍率。";
 
   return (
     <main className="game-page">
