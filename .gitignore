@@ -36,6 +36,10 @@ yarn-error.log*
 
 # typescript
 next-env.d.ts
+tsconfig.tsbuildinfo
+
+# claude code local settings
+.claude/settings.local.json
 /dist/
 /.wrangler/
 /outputs/
