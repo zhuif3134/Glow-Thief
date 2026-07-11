@@ -262,6 +262,15 @@ button:focus-visible {
   box-shadow: 7px 7px 0 var(--coral), -5px -5px 0 var(--cyan), 0 0 32px rgba(247, 240, 71, 0.72);
 }
 
+.arena-frame.is-expiring {
+  animation: danger-pulse 0.34s steps(2, end) infinite;
+}
+
+.arena-frame.is-expiring .status-right {
+  color: var(--bone);
+  background: var(--coral);
+}
+
 .game-canvas {
   display: block;
   width: 100%;
@@ -443,7 +452,14 @@ button:focus-visible {
 
 .light-track i { background: var(--acid); }
 .dash-track i { background: var(--cyan); }
+.meter-block.is-expiring .meter-label { color: #b80023; }
+.meter-block.is-expiring .light-track i { background: var(--coral); }
 .touch-controls { display: none; }
+
+@keyframes danger-pulse {
+  0%, 100% { box-shadow: 7px 7px 0 var(--coral), -5px -5px 0 var(--cyan), 0 0 18px rgba(255, 78, 104, 0.5); }
+  50% { box-shadow: 10px 10px 0 var(--coral), -7px -7px 0 var(--cyan), 0 0 42px rgba(255, 78, 104, 0.95); }
+}
 
 @media (max-width: 980px) {
   .game-page { overflow: auto; padding: 10px; }
@@ -545,5 +561,7 @@ button:focus-visible {
   *::before,
   *::after {
     transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

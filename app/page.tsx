@@ -15,6 +15,8 @@ type Particle = Point & {
   color: string;
   size: number;
 };
+type Impact = Point & { life: number; maxLife: number };
+type PopText = Point & { life: number; text: string };
 
 type Game = {
   status: GameStatus;
@@ -22,6 +24,8 @@ type Game = {
   enemies: Enemy[];
   sparks: Spark[];
   particles: Particle[];
+  impacts: Impact[];
+  popTexts: PopText[];
   score: number;
   best: number;
   combo: number;
@@ -38,6 +42,7 @@ type Game = {
   spawnTimer: number;
   shake: number;
   flash: number;
+  hitStop: number;
 };
 
 type UiState = {
@@ -56,6 +61,7 @@ type UiState = {
 const W = 1280;
 const H = 800;
 const DASH_COOLDOWN = 0.92;
+const FEVER_DURATION = 6.2;
 const obstacles = [
   { x: 72, y: 150, w: 260, h: 76 },
   { x: 900, y: 176, w: 255, h: 72 },
@@ -107,6 +113,8 @@ function initialGame(best: number): Game {
     enemies: Array.from({ length: 4 }, () => makeEnemy()),
     sparks: Array.from({ length: 11 }, makeSpark),
     particles: [],
+    impacts: [],
+    popTexts: [],
     score: 0,
     best,
     combo: 1,
@@ -123,6 +131,7 @@ function initialGame(best: number): Game {
     spawnTimer: 0,
     shake: 0,
     flash: 0,
+    hitStop: 0,
   };
 }
 
@@ -269,12 +278,16 @@ export default function Home() {
 
     const smashEnemy = (index: number) => {
       const enemy = game.enemies[index];
+      const points = 240 * game.combo * (game.fever > 0 ? 2 : 1);
       burst(enemy.x, enemy.y, "#ff4e68", 18, 280);
       burst(enemy.x, enemy.y, "#f2ecd8", 7, 170);
-      game.score += 240 * game.combo * (game.fever > 0 ? 2 : 1);
+      game.impacts.push({ x: enemy.x, y: enemy.y, life: 0.34, maxLife: 0.34 });
+      game.popTexts.push({ x: enemy.x, y: enemy.y - 22, life: 0.72, text: `+${points}` });
+      game.score += points;
       game.combo = Math.min(9, game.combo + 1);
       game.comboTimer = 2.85;
       game.shake = 8;
+      game.hitStop = 0.055;
       game.enemies.splice(index, 1);
       game.spawnTimer = Math.min(game.spawnTimer, 0.28);
       tone("smash");
@@ -282,11 +295,20 @@ export default function Home() {
 
     const update = (dt: number) => {
       if (game.status !== "running") return;
+      if (game.hitStop > 0) {
+        game.hitStop = Math.max(0, game.hitStop - dt);
+        return;
+      }
       game.elapsed += dt;
       game.dashCooldown = Math.max(0, game.dashCooldown - dt);
       game.dashTime = Math.max(0, game.dashTime - dt);
       game.invincible = Math.max(0, game.invincible - dt);
+      const hadFever = game.fever > 0;
       game.fever = Math.max(0, game.fever - dt);
+      if (hadFever && game.fever === 0) {
+        game.invincible = Math.max(game.invincible, 0.45);
+        burst(game.player.x, game.player.y, "#f2ecd8", 12, 150);
+      }
       game.comboTimer = Math.max(0, game.comboTimer - dt);
       game.spawnTimer -= dt;
       game.shake = Math.max(0, game.shake - 26 * dt);
@@ -336,7 +358,7 @@ export default function Home() {
           tone("spark");
           if (game.light >= 100) {
             game.light = 0;
-            game.fever = 6.2;
+            game.fever = FEVER_DURATION;
             game.flash = 1;
             burst(game.player.x, game.player.y, "#f2ecd8", 34, 330);
             tone("fever");
@@ -399,6 +421,13 @@ export default function Home() {
         particle.vy = particle.vy * Math.pow(0.09, dt) + 95 * dt;
       });
       game.particles = game.particles.filter((particle) => particle.life > 0);
+      game.impacts.forEach((impact) => { impact.life -= dt; });
+      game.impacts = game.impacts.filter((impact) => impact.life > 0);
+      game.popTexts.forEach((pop) => {
+        pop.life -= dt;
+        pop.y -= 46 * dt;
+      });
+      game.popTexts = game.popTexts.filter((pop) => pop.life > 0);
     };
 
     const roundedRect = (
@@ -451,12 +480,6 @@ export default function Home() {
         ctx.lineWidth = 5;
         ctx.strokeStyle = "#f2ecd8";
         ctx.stroke();
-        ctx.fillStyle = index % 2 ? "#2df4e6" : "#ff4e68";
-        ctx.save();
-        ctx.translate(rect.x + rect.w * 0.52, rect.y - 4);
-        ctx.rotate(index % 2 ? -0.1 : 0.08);
-        ctx.fillRect(-48, -5, 96, 10);
-        ctx.restore();
       });
 
       game.sparks.forEach((spark) => {
@@ -523,19 +546,73 @@ export default function Home() {
       });
       ctx.globalAlpha = 1;
 
+      game.impacts.forEach((impact) => {
+        const progress = 1 - impact.life / impact.maxLife;
+        ctx.save();
+        ctx.translate(impact.x, impact.y);
+        ctx.globalAlpha = 1 - progress;
+        ctx.strokeStyle = "#f2ecd8";
+        ctx.lineWidth = 8 - progress * 5;
+        ctx.beginPath();
+        ctx.arc(0, 0, 18 + progress * 62, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = "#ff4e68";
+        ctx.lineWidth = 4;
+        for (let ray = 0; ray < 8; ray += 1) {
+          const angle = (Math.PI * 2 * ray) / 8;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(angle) * (24 + progress * 18), Math.sin(angle) * (24 + progress * 18));
+          ctx.lineTo(Math.cos(angle) * (44 + progress * 46), Math.sin(angle) * (44 + progress * 46));
+          ctx.stroke();
+        }
+        ctx.restore();
+      });
+
+      game.popTexts.forEach((pop) => {
+        ctx.save();
+        ctx.translate(pop.x, pop.y);
+        ctx.rotate(-0.08);
+        ctx.globalAlpha = clamp(pop.life / 0.25, 0, 1);
+        ctx.font = "900 30px Impact, Arial Black, sans-serif";
+        ctx.textAlign = "center";
+        ctx.lineWidth = 7;
+        ctx.strokeStyle = "#09090b";
+        ctx.strokeText(pop.text, 0, 0);
+        ctx.fillStyle = "#f7f047";
+        ctx.fillText(pop.text, 0, 0);
+        ctx.restore();
+      });
+      ctx.globalAlpha = 1;
+
       const player = game.player;
       const blinking = game.invincible > 0 && Math.floor(game.invincible * 14) % 2 === 0;
       if (!blinking) {
         ctx.save();
         ctx.translate(player.x, player.y);
         if (game.dashTime > 0) {
+          for (let echo = 4; echo >= 1; echo -= 1) {
+            ctx.globalAlpha = 0.08 + (4 - echo) * 0.035;
+            ctx.fillStyle = echo % 2 ? "#2df4e6" : "#f2ecd8";
+            ctx.beginPath();
+            ctx.arc(-game.dashX * echo * 27, -game.dashY * echo * 27, 25 - echo * 2.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
           ctx.strokeStyle = "rgba(45, 244, 230, .55)";
-          ctx.lineWidth = 15;
+          ctx.lineWidth = 17;
           ctx.lineCap = "round";
           ctx.beginPath();
           ctx.moveTo(-game.dashX * 92, -game.dashY * 92);
           ctx.lineTo(-game.dashX * 26, -game.dashY * 26);
           ctx.stroke();
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "rgba(242,236,216,.8)";
+          for (let streak = -2; streak <= 2; streak += 1) {
+            ctx.beginPath();
+            ctx.moveTo(-game.dashX * (115 + Math.abs(streak) * 12) - game.dashY * streak * 12, -game.dashY * (115 + Math.abs(streak) * 12) + game.dashX * streak * 12);
+            ctx.lineTo(-game.dashX * 48 - game.dashY * streak * 12, -game.dashY * 48 + game.dashX * streak * 12);
+            ctx.stroke();
+          }
         }
         if (game.fever > 0) {
           ctx.strokeStyle = `rgba(247,240,71,${0.45 + Math.sin(game.elapsed * 12) * 0.2})`;
@@ -697,7 +774,7 @@ export default function Home() {
         </header>
 
         <div className="arena-wrap">
-          <div className={`arena-frame ${ui.fever > 0 ? "is-fever" : ""}`}>
+          <div className={`arena-frame ${ui.fever > 0 ? "is-fever" : ""} ${ui.fever > 0 && ui.fever <= 1.5 ? "is-expiring" : ""}`}>
             <canvas
               ref={canvasRef}
               className="game-canvas"
@@ -715,7 +792,7 @@ export default function Home() {
               </div>
             </div>
             <div className="arena-status status-right">
-              <span>{ui.fever > 0 ? "发光中" : `第 ${ui.stage} 轮 · ${ui.time}s`}</span>
+              <span>{ui.fever > 0 ? `发光 ${ui.fever.toFixed(1)}s` : `第 ${ui.stage} 轮 · ${ui.time}s`}</span>
             </div>
 
             {ui.status !== "running" && (
@@ -755,9 +832,9 @@ export default function Home() {
           </div>
 
           <div className="meters">
-            <div className="meter-block">
-              <div className="meter-label"><span>灯袋</span><strong>{ui.fever > 0 ? "发光中" : `${ui.light}%`}</strong></div>
-              <div className="meter-track light-track"><i style={{ width: `${ui.fever > 0 ? 100 : ui.light}%` }} /></div>
+            <div className={`meter-block ${ui.fever > 0 && ui.fever <= 1.5 ? "is-expiring" : ""}`}>
+              <div className="meter-label"><span>{ui.fever > 0 ? "发光剩余" : "灯袋"}</span><strong>{ui.fever > 0 ? `${ui.fever.toFixed(1)}s` : `${ui.light}%`}</strong></div>
+              <div className="meter-track light-track"><i style={{ width: `${ui.fever > 0 ? (ui.fever / FEVER_DURATION) * 100 : ui.light}%` }} /></div>
             </div>
             <div className="meter-block">
               <div className="meter-label"><span>冲刺</span><strong>{ui.dash >= 1 ? "READY" : `${Math.round(ui.dash * 100)}%`}</strong></div>
