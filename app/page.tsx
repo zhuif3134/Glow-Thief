@@ -19,6 +19,7 @@ type Impact = Point & { life: number; maxLife: number };
 type PopText = Point & { life: number; text: string };
 type Slash = Point & { angle: number; life: number; maxLife: number };
 type Dust = Point & { vx: number; vy: number; size: number; phase: number };
+type Smoke = Point & { vx: number; vy: number; life: number; maxLife: number; size: number };
 
 type Game = {
   status: GameStatus;
@@ -29,7 +30,11 @@ type Game = {
   impacts: Impact[];
   popTexts: PopText[];
   slashes: Slash[];
+  dashTrails: Slash[];
+  trailTimer: number;
   dust: Dust[];
+  smoke: Smoke[];
+  smokeTimer: number;
   camX: number;
   camY: number;
   score: number;
@@ -126,7 +131,7 @@ function makeEnemy(elapsed = 0): Enemy {
     ...point,
     r: 21 + Math.random() * 7,
     wobble: Math.random() * Math.PI * 2,
-    speed: 70 + Math.random() * 26 + Math.min(70, elapsed * 1.25),
+    speed: 91 + Math.random() * 34 + Math.min(91, elapsed * 1.63),
     vx: 0,
     vy: 0,
   };
@@ -157,6 +162,10 @@ function initialGame(best: number): Game {
     impacts: [],
     popTexts: [],
     slashes: [],
+    dashTrails: [],
+    trailTimer: 0,
+    smoke: [],
+    smokeTimer: 0,
     dust: Array.from({ length: 64 }, makeDust),
     camX: (W - VIEW_W) / 2,
     camY: (H - VIEW_H) / 2,
@@ -203,6 +212,7 @@ export default function Home() {
   const keysRef = useRef(new Set<string>());
   const dashRequestRef = useRef(false);
   const superRequestRef = useRef(false);
+  const feverRequestRef = useRef(false);
   const gameRef = useRef<Game | null>(null);
   const startGameRef = useRef<() => void>(() => undefined);
   const togglePauseRef = useRef<() => void>(() => undefined);
@@ -308,6 +318,7 @@ export default function Home() {
       Object.assign(game, initialGame(currentBest), { status: "running" as GameStatus });
       dashRequestRef.current = false;
       superRequestRef.current = false;
+      feverRequestRef.current = false;
       tone("dash");
       syncUi();
     };
@@ -346,12 +357,13 @@ export default function Home() {
       game.slashes.push({
         x: enemy.x,
         y: enemy.y,
-        angle: Math.atan2(enemy.y - game.player.y, enemy.x - game.player.x),
+        angle: Math.atan2(game.dashY, game.dashX) + (Math.random() - 0.5) * 0.2,
         life: 0.3,
         maxLife: 0.3,
       });
       game.popTexts.push({ x: enemy.x, y: enemy.y - 22, life: 0.72, text: `+${points}` });
       game.score += points;
+      if (game.superOn) game.energy = Math.min(100, game.energy + 3);
       game.combo = Math.min(9, game.combo + 1);
       game.comboTimer = 2.85;
       game.shake = 8;
@@ -410,7 +422,6 @@ export default function Home() {
         game.superOn = true;
         game.flash = 1;
         game.shake = 12;
-        game.invincible = Math.max(game.invincible, 0.5);
         burst(game.player.x, game.player.y, "#f7f047", 30, 340);
         burst(game.player.x, game.player.y, "#2df4e6", 16, 240);
         game.popTexts.push({ x: game.player.x, y: game.player.y - 44, life: 0.9, text: "觉醒!!" });
@@ -423,7 +434,6 @@ export default function Home() {
         game.dashCooldown = 0;
         if (game.energy === 0) {
           game.superOn = false;
-          game.invincible = Math.max(game.invincible, 0.6);
           game.flash = 0.5;
           burst(game.player.x, game.player.y, "#f2ecd8", 14, 170);
           tone("dash");
@@ -431,7 +441,7 @@ export default function Home() {
       }
 
       if (dashRequestRef.current && game.dashCooldown === 0) {
-        game.dashTime = 0.19;
+        game.dashTime = game.superOn ? 0.31 : 0.19;
         game.dashCooldown = game.superOn ? 0 : DASH_COOLDOWN;
         game.dashX = mx || my ? mx : game.player.faceX;
         game.dashY = mx || my ? my : game.player.faceY;
@@ -440,16 +450,32 @@ export default function Home() {
       }
       dashRequestRef.current = false;
 
-      const maxSpeed = game.superOn ? 430 : game.fever > 0 ? 368 : 300;
+      const maxSpeed = game.superOn ? 507 : game.fever > 0 ? 478 : 390;
       if (game.dashTime > 0) {
         game.player.vx = game.dashX * 810;
         game.player.vy = game.dashY * 810;
       } else {
-        const accelK = 1 - Math.exp(-(mx || my ? 7.5 : 5.2) * dt);
+        const accelK = 1 - Math.exp(-(mx || my ? 8.4 : 5.9) * dt);
         game.player.vx += (mx * maxSpeed - game.player.vx) * accelK;
         game.player.vy += (my * maxSpeed - game.player.vy) * accelK;
       }
       movePlayer(game.player.vx * dt, game.player.vy * dt);
+
+      if (game.superOn && game.dashTime > 0) {
+        game.trailTimer -= dt;
+        if (game.trailTimer <= 0) {
+          game.trailTimer = 0.03;
+          game.dashTrails.push({
+            x: game.player.x,
+            y: game.player.y,
+            angle: Math.atan2(game.dashY, game.dashX),
+            life: 0.34,
+            maxLife: 0.34,
+          });
+        }
+      } else {
+        game.trailTimer = 0;
+      }
 
       const targetCamX = clamp(game.player.x - VIEW_W / 2, 0, W - VIEW_W);
       const targetCamY = clamp(game.player.y - VIEW_H / 2, 0, H - VIEW_H);
@@ -463,20 +489,23 @@ export default function Home() {
         if (dist(game.player, spark) < game.player.r + 17) {
           burst(spark.x, spark.y, "#f7f047", 10, 155);
           game.score += 90 * game.combo;
-          game.light += 10;
+          game.light = Math.min(100, game.light + 10);
           game.energy = Math.min(100, game.energy + ENERGY_PER_SPARK);
           game.dashCooldown = Math.max(0, game.dashCooldown - 0.13);
           game.sparks[index] = makeSpark();
           tone("spark");
-          if (game.light >= 100) {
-            game.light = 0;
-            game.fever = FEVER_DURATION;
-            game.flash = 1;
-            burst(game.player.x, game.player.y, "#f2ecd8", 34, 330);
-            tone("fever");
-          }
         }
       }
+
+      if (feverRequestRef.current && game.fever === 0 && game.light >= 100) {
+        game.light = 0;
+        game.fever = FEVER_DURATION;
+        game.flash = 1;
+        game.popTexts.push({ x: game.player.x, y: game.player.y - 44, life: 0.9, text: "发光!!" });
+        burst(game.player.x, game.player.y, "#f2ecd8", 34, 330);
+        tone("fever");
+      }
+      feverRequestRef.current = false;
 
       const targetEnemies = Math.min(14, 5 + Math.floor(game.elapsed / 12));
       if (game.enemies.length < targetEnemies && game.spawnTimer <= 0) {
@@ -504,10 +533,13 @@ export default function Home() {
         enemy.x = clamp(enemy.x, enemy.r + 12, W - enemy.r - 12);
         enemy.y = clamp(enemy.y, enemy.r + 16, H - enemy.r - 16);
 
-        if (dist(game.player, enemy) < game.player.r + enemy.r - 4) {
-          if (game.dashTime > 0 || game.fever > 0 || game.superOn) {
-            smashEnemy(index);
-          } else if (game.invincible === 0) {
+        const gap = dist(game.player, enemy);
+        const touchRange = game.player.r + enemy.r - 4;
+        const dashKillRange = touchRange + (game.superOn ? 10 : 0);
+        if (game.dashTime > 0 && gap < dashKillRange) {
+          smashEnemy(index);
+        } else if (gap < touchRange) {
+          if (game.invincible === 0 && game.fever === 0) {
             game.shields -= 1;
             game.combo = 1;
             game.comboTimer = 0;
@@ -548,6 +580,27 @@ export default function Home() {
       game.popTexts = game.popTexts.filter((pop) => pop.life > 0);
       game.slashes.forEach((slash) => { slash.life -= dt; });
       game.slashes = game.slashes.filter((slash) => slash.life > 0);
+      game.dashTrails.forEach((trail) => { trail.life -= dt; });
+      game.dashTrails = game.dashTrails.filter((trail) => trail.life > 0);
+      game.smokeTimer -= dt;
+      if (game.superOn && game.smokeTimer <= 0) {
+        game.smokeTimer = 0.055;
+        game.smoke.push({
+          x: game.player.x + (Math.random() - 0.5) * 30,
+          y: game.player.y + (Math.random() - 0.5) * 30,
+          vx: -game.player.vx * 0.14 + (Math.random() - 0.5) * 36,
+          vy: -game.player.vy * 0.14 + (Math.random() - 0.5) * 36 - 12,
+          life: 0.55 + Math.random() * 0.3,
+          maxLife: 0.85,
+          size: 5 + Math.random() * 6,
+        });
+      }
+      game.smoke.forEach((puff) => {
+        puff.life -= dt;
+        puff.x += puff.vx * dt;
+        puff.y += puff.vy * dt;
+      });
+      game.smoke = game.smoke.filter((puff) => puff.life > 0);
       game.dust.forEach((mote) => {
         mote.x += mote.vx * dt;
         mote.y += mote.vy * dt;
@@ -760,37 +813,68 @@ export default function Home() {
         ctx.restore();
       });
 
+      game.dashTrails.forEach((trail) => {
+        const progress = 1 - trail.life / trail.maxLife;
+        const len = 20 + progress * 6;
+        const width = 3.2 * (1 - progress * 0.6);
+        ctx.save();
+        ctx.translate(trail.x, trail.y);
+        ctx.rotate(trail.angle);
+        ctx.globalAlpha = (1 - progress) * 0.75;
+        ctx.fillStyle = "rgba(45,244,230,.3)";
+        ctx.beginPath();
+        ctx.moveTo(-len * 1.15, 0);
+        ctx.quadraticCurveTo(0, -width * 2.4, len * 1.15, 0);
+        ctx.quadraticCurveTo(0, width * 2.4, -len * 1.15, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "rgba(242,252,250,.85)";
+        ctx.beginPath();
+        ctx.moveTo(-len, 0);
+        ctx.quadraticCurveTo(0, -width, len, 0);
+        ctx.quadraticCurveTo(0, width, -len, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      });
+      ctx.globalAlpha = 1;
+
       game.slashes.forEach((slash) => {
         const progress = 1 - slash.life / slash.maxLife;
         const ease = 1 - Math.pow(1 - progress, 3);
-        const radius = 42 + ease * 38;
-        const sweep = 1.25;
+        const len = 34 + ease * 32;
+        const width = 5 * (1 - progress * 0.45);
         ctx.save();
         ctx.translate(slash.x, slash.y);
-        ctx.rotate(slash.angle - 0.3 + ease * 0.6);
+        ctx.rotate(slash.angle);
         ctx.globalAlpha = 1 - progress;
-        ctx.lineCap = "round";
-        ctx.strokeStyle = "rgba(45,244,230,.32)";
-        ctx.lineWidth = 6;
+        ctx.fillStyle = "rgba(45,244,230,.32)";
         ctx.beginPath();
-        ctx.arc(0, 0, radius, -sweep, sweep);
-        ctx.stroke();
+        ctx.moveTo(-len * 1.12, 0);
+        ctx.quadraticCurveTo(0, -width * 2.6, len * 1.12, 0);
+        ctx.quadraticCurveTo(0, width * 2.6, -len * 1.12, 0);
+        ctx.closePath();
+        ctx.fill();
         ctx.fillStyle = "#ffffff";
         ctx.beginPath();
-        ctx.arc(0, 0, radius, -sweep, sweep);
-        ctx.arc(-7, 0, radius, sweep, -sweep, true);
+        ctx.moveTo(-len, 0);
+        ctx.quadraticCurveTo(0, -width, len, 0);
+        ctx.quadraticCurveTo(0, width, -len, 0);
         ctx.closePath();
         ctx.fill();
         ctx.strokeStyle = "rgba(45,244,230,.9)";
-        ctx.lineWidth = 1.1;
+        ctx.lineWidth = 1;
+        ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.arc(0, 0, radius + 1.6, -sweep * 0.88, sweep * 0.88);
+        ctx.moveTo(-len, 0);
+        ctx.quadraticCurveTo(0, -width - 1.2, len, 0);
         ctx.stroke();
         ctx.globalAlpha = (1 - progress) * 0.4;
-        ctx.strokeStyle = "#f2ecd8";
+        ctx.strokeStyle = "#2df4e6";
         ctx.lineWidth = 1.4;
         ctx.beginPath();
-        ctx.arc(0, 0, radius * 0.6, Math.PI - sweep * 0.65, Math.PI + sweep * 0.65);
+        ctx.moveTo(-len * 0.5 + 9, 11);
+        ctx.lineTo(len * 0.5 + 9, 11);
         ctx.stroke();
         ctx.restore();
       });
@@ -808,6 +892,16 @@ export default function Home() {
         ctx.fillStyle = "#f7f047";
         ctx.fillText(pop.text, 0, 0);
         ctx.restore();
+      });
+      ctx.globalAlpha = 1;
+
+      game.smoke.forEach((puff) => {
+        const puffP = 1 - puff.life / puff.maxLife;
+        ctx.globalAlpha = 0.13 * (puff.life / puff.maxLife);
+        ctx.fillStyle = "#2df4e6";
+        ctx.beginPath();
+        ctx.arc(puff.x, puff.y, puff.size * (1 + puffP * 0.9), 0, Math.PI * 2);
+        ctx.fill();
       });
       ctx.globalAlpha = 1;
 
@@ -940,26 +1034,32 @@ export default function Home() {
         }
         if (dashReady) {
           const lampHalo = ctx.createRadialGradient(0, lampY, 1, 0, lampY, 17);
-          lampHalo.addColorStop(0, "rgba(45,244,230,.55)");
+          lampHalo.addColorStop(0, "rgba(45,244,230,.5)");
           lampHalo.addColorStop(1, "rgba(45,244,230,0)");
           ctx.fillStyle = lampHalo;
           ctx.beginPath();
           ctx.arc(0, lampY, 17, 0, Math.PI * 2);
           ctx.fill();
         }
-        ctx.strokeStyle = "rgba(242,236,216,.8)";
-        ctx.lineWidth = 2;
+        ctx.save();
+        ctx.translate(0, lampY);
+        ctx.rotate(-Math.PI / 4);
+        ctx.lineCap = "round";
+        ctx.strokeStyle = dashReady ? "#2df4e6" : "rgba(45,244,230,.25)";
+        ctx.lineWidth = 3.4;
         ctx.beginPath();
-        ctx.moveTo(0, -32);
-        ctx.lineTo(0, lampY + 6);
+        ctx.moveTo(-8, 1);
+        ctx.quadraticCurveTo(0, -4.4, 8, 1);
         ctx.stroke();
-        ctx.fillStyle = dashReady ? "#2df4e6" : "rgba(45,244,230,.16)";
-        ctx.strokeStyle = dashReady ? "#f2ecd8" : "rgba(242,236,216,.5)";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, lampY, 5.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+        if (dashReady) {
+          ctx.strokeStyle = "rgba(255,255,255,.9)";
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(-6, 0.2);
+          ctx.quadraticCurveTo(0, -4, 6, 0.2);
+          ctx.stroke();
+        }
+        ctx.restore();
         if (!dashReady) {
           const cooldownP = 1 - game.dashCooldown / DASH_COOLDOWN;
           ctx.strokeStyle = "rgba(45,244,230,.8)";
@@ -1141,7 +1241,8 @@ export default function Home() {
         return;
       }
       if (event.code === "Space" && !event.repeat) dashRequestRef.current = true;
-      if (event.code === "KeyR" && !event.repeat) superRequestRef.current = true;
+      if (event.code === "KeyR" && !event.repeat) feverRequestRef.current = true;
+      if (event.code === "KeyQ" && !event.repeat) superRequestRef.current = true;
       keysRef.current.add(event.code);
     };
     const onKeyUp = (event: KeyboardEvent) => keysRef.current.delete(event.code);
@@ -1187,7 +1288,7 @@ export default function Home() {
       ? `本轮 ${ui.score.toLocaleString("zh-CN")} 分，最高 ${ui.best.toLocaleString("zh-CN")} 分`
       : ui.status === "paused"
         ? "影子也暂停了。按空格 / 回车 / P 原地继续。"
-        : "捡光点填满灯袋，同时给总能量充能。冲刺会挥剑斩碎影子，能量满后按 R 觉醒。";
+        : "捡光点充能：灯袋满按 R 无敌发光，总能量满按 Q 觉醒狂飙。冲刺挥剑斩碎影子。";
 
   return (
     <main className="game-page">
@@ -1288,14 +1389,19 @@ export default function Home() {
             <span className="keycap wide">SPACE</span>
             <span className="legend-copy">冲刺</span>
             <span className="keycap">R</span>
+            <span className="legend-copy">发光</span>
+            <span className="keycap">Q</span>
             <span className="legend-copy">觉醒</span>
             <span className="keycap">P</span>
             <span className="legend-copy">暂停</span>
           </div>
 
           <div className="meters">
-            <div className={`meter-block ${ui.fever > 0 && ui.fever <= 1.5 ? "is-expiring" : ""}`}>
-              <div className="meter-label"><span>{ui.fever > 0 ? "发光剩余" : "灯袋"}</span><strong>{ui.fever > 0 ? `${ui.fever.toFixed(1)}s` : `${ui.light}%`}</strong></div>
+            <div className={`meter-block ${ui.fever > 0 && ui.fever <= 1.5 ? "is-expiring" : ""} ${ui.light >= 100 && ui.fever === 0 ? "is-ready" : ""}`}>
+              <div className="meter-label">
+                <span>{ui.fever > 0 ? "发光剩余" : "灯袋"}</span>
+                <strong>{ui.fever > 0 ? `${ui.fever.toFixed(1)}s` : ui.light >= 100 ? "按 R 发光!" : `${ui.light}%`}</strong>
+              </div>
               <div className="meter-track light-track"><i style={{ width: `${ui.fever > 0 ? (ui.fever / FEVER_DURATION) * 100 : ui.light}%` }} /></div>
             </div>
             <div className="meter-block">
@@ -1305,7 +1411,7 @@ export default function Home() {
             <div className={`meter-block ${ui.energy >= 100 && !ui.superOn ? "is-ready" : ""} ${ui.superOn ? "is-super" : ""}`}>
               <div className="meter-label">
                 <span>总能量</span>
-                <strong>{ui.superOn ? "觉醒中!!" : ui.energy >= 100 ? "按 R 觉醒!" : `${ui.energy}%`}</strong>
+                <strong>{ui.superOn ? "觉醒中!!" : ui.energy >= 100 ? "按 Q 觉醒!" : `${ui.energy}%`}</strong>
               </div>
               <div className="meter-track energy-track"><i style={{ width: `${ui.energy}%` }} /></div>
             </div>
@@ -1356,6 +1462,12 @@ export default function Home() {
               onPointerDown={() => { dashRequestRef.current = true; }}
               aria-label="冲刺"
             >冲刺</button>
+            <button
+              className="dash-button fever-button"
+              type="button"
+              onPointerDown={() => { feverRequestRef.current = true; }}
+              aria-label="发光"
+            >发光</button>
             <button
               className="dash-button awaken-button"
               type="button"

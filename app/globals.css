@@ -558,6 +558,10 @@ button:focus-visible {
     color: var(--bone);
     box-shadow: 4px 4px 0 var(--acid);
   }
+  .fever-button {
+    background: var(--cyan);
+    box-shadow: 4px 4px 0 var(--coral);
+  }
 }
 
 @media (max-width: 560px) {
