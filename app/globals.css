@@ -240,7 +240,7 @@ button:focus-visible {
 
 .arena-frame {
   position: relative;
-  width: min(100%, calc((100dvh - 285px) * 1.6));
+  width: min(100%, calc((100dvh - 300px) * 1.6));
   min-width: 0;
   aspect-ratio: 16 / 10;
   overflow: hidden;
@@ -260,6 +260,15 @@ button:focus-visible {
 
 .arena-frame.is-fever {
   box-shadow: 7px 7px 0 var(--coral), -5px -5px 0 var(--cyan), 0 0 32px rgba(247, 240, 71, 0.72);
+}
+
+.arena-frame.is-super {
+  animation: super-pulse 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes super-pulse {
+  from { box-shadow: 7px 7px 0 var(--coral), -5px -5px 0 var(--cyan), 0 0 26px rgba(247, 240, 71, 0.6); }
+  to { box-shadow: 7px 7px 0 var(--cyan), -5px -5px 0 var(--acid), 0 0 60px rgba(247, 240, 71, 0.95); }
 }
 
 .arena-frame.is-expiring {
@@ -423,8 +432,8 @@ button:focus-visible {
 
 .meters {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
 }
 
 .meter-label {
@@ -452,8 +461,27 @@ button:focus-visible {
 
 .light-track i { background: var(--acid); }
 .dash-track i { background: var(--cyan); }
+.energy-track i { background: linear-gradient(90deg, var(--coral), var(--acid)); }
 .meter-block.is-expiring .meter-label { color: #b80023; }
 .meter-block.is-expiring .light-track i { background: var(--coral); }
+.meter-block.is-ready .meter-label strong {
+  color: var(--coral);
+  animation: energy-ready 0.5s steps(2, end) infinite;
+}
+.meter-block.is-super .energy-track i {
+  background: linear-gradient(90deg, var(--cyan), var(--acid), var(--coral));
+  animation: energy-flow 0.6s linear infinite;
+  background-size: 200% 100%;
+}
+
+@keyframes energy-ready {
+  50% { opacity: 0.25; }
+}
+
+@keyframes energy-flow {
+  from { background-position: 0% 0; }
+  to { background-position: 200% 0; }
+}
 .touch-controls { display: none; }
 
 @keyframes danger-pulse {
@@ -524,6 +552,11 @@ button:focus-visible {
     border-color: var(--night);
     box-shadow: 4px 4px 0 var(--coral);
     font-size: 16px;
+  }
+  .awaken-button {
+    background: var(--coral);
+    color: var(--bone);
+    box-shadow: 4px 4px 0 var(--acid);
   }
 }
 

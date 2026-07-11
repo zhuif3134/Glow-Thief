@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type GameStatus = "menu" | "running" | "paused" | "gameover";
 
 type Point = { x: number; y: number };
-type Enemy = Point & { r: number; wobble: number; speed: number };
+type Enemy = Point & { r: number; wobble: number; speed: number; vx: number; vy: number };
 type Spark = Point & { spin: number };
 type Particle = Point & {
   vx: number;
@@ -18,16 +18,20 @@ type Particle = Point & {
 type Impact = Point & { life: number; maxLife: number };
 type PopText = Point & { life: number; text: string };
 type Slash = Point & { angle: number; life: number; maxLife: number };
+type Dust = Point & { vx: number; vy: number; size: number; phase: number };
 
 type Game = {
   status: GameStatus;
-  player: Point & { r: number; faceX: number; faceY: number };
+  player: Point & { r: number; faceX: number; faceY: number; vx: number; vy: number };
   enemies: Enemy[];
   sparks: Spark[];
   particles: Particle[];
   impacts: Impact[];
   popTexts: PopText[];
   slashes: Slash[];
+  dust: Dust[];
+  camX: number;
+  camY: number;
   score: number;
   best: number;
   combo: number;
@@ -35,8 +39,11 @@ type Game = {
   shields: number;
   light: number;
   fever: number;
+  energy: number;
+  superOn: boolean;
   elapsed: number;
   dashCooldown: number;
+  dashReadyFlash: number;
   dashTime: number;
   dashX: number;
   dashY: number;
@@ -58,18 +65,37 @@ type UiState = {
   stage: number;
   time: number;
   fever: number;
+  energy: number;
+  superOn: boolean;
 };
 
-const W = 1280;
-const H = 800;
+const VIEW_W = 1280;
+const VIEW_H = 800;
+const W = 2200;
+const H = 1400;
 const DASH_COOLDOWN = 0.92;
 const FEVER_DURATION = 6.2;
+const ENERGY_PER_SPARK = 6;
+const SUPER_DRAIN = 100 / 12;
 const obstacles = [
-  { x: 72, y: 150, w: 260, h: 76 },
-  { x: 900, y: 176, w: 255, h: 72 },
-  { x: 130, y: 560, w: 285, h: 80 },
-  { x: 760, y: 570, w: 220, h: 68 },
-  { x: 520, y: 310, w: 130, h: 42 },
+  { x: 120, y: 180, w: 280, h: 78 },
+  { x: 640, y: 120, w: 190, h: 64 },
+  { x: 1250, y: 210, w: 300, h: 78 },
+  { x: 1830, y: 150, w: 220, h: 70 },
+  { x: 210, y: 640, w: 230, h: 74 },
+  { x: 930, y: 540, w: 150, h: 48 },
+  { x: 1520, y: 660, w: 280, h: 76 },
+  { x: 150, y: 1120, w: 300, h: 80 },
+  { x: 800, y: 1050, w: 240, h: 70 },
+  { x: 1420, y: 1140, w: 260, h: 72 },
+  { x: 1940, y: 980, w: 190, h: 64 },
+];
+const ambientLights = [
+  { x: 330, y: 300, r: 330, rgb: "45,244,230" },
+  { x: 1720, y: 330, r: 360, rgb: "255,78,104" },
+  { x: 540, y: 1070, r: 330, rgb: "247,240,71" },
+  { x: 1860, y: 1130, r: 320, rgb: "45,244,230" },
+  { x: 1100, y: 720, r: 420, rgb: "242,236,216" },
 ];
 
 const clamp = (value: number, min: number, max: number) =>
@@ -101,6 +127,19 @@ function makeEnemy(elapsed = 0): Enemy {
     r: 21 + Math.random() * 7,
     wobble: Math.random() * Math.PI * 2,
     speed: 70 + Math.random() * 26 + Math.min(70, elapsed * 1.25),
+    vx: 0,
+    vy: 0,
+  };
+}
+
+function makeDust(): Dust {
+  return {
+    x: Math.random() * W,
+    y: Math.random() * H,
+    vx: (Math.random() - 0.5) * 16,
+    vy: -8 - Math.random() * 16,
+    size: 1 + Math.random() * 2.4,
+    phase: Math.random() * Math.PI * 2,
   };
 }
 
@@ -111,13 +150,16 @@ function makeSpark(): Spark {
 function initialGame(best: number): Game {
   return {
     status: "menu",
-    player: { x: W / 2, y: H / 2, r: 25, faceX: 1, faceY: 0 },
-    enemies: Array.from({ length: 4 }, () => makeEnemy()),
-    sparks: Array.from({ length: 11 }, makeSpark),
+    player: { x: W / 2, y: H / 2, r: 25, faceX: 1, faceY: 0, vx: 0, vy: 0 },
+    enemies: Array.from({ length: 5 }, () => makeEnemy()),
+    sparks: Array.from({ length: 17 }, makeSpark),
     particles: [],
     impacts: [],
     popTexts: [],
     slashes: [],
+    dust: Array.from({ length: 64 }, makeDust),
+    camX: (W - VIEW_W) / 2,
+    camY: (H - VIEW_H) / 2,
     score: 0,
     best,
     combo: 1,
@@ -125,8 +167,11 @@ function initialGame(best: number): Game {
     shields: 3,
     light: 0,
     fever: 0,
+    energy: 0,
+    superOn: false,
     elapsed: 0,
     dashCooldown: 0,
+    dashReadyFlash: 0,
     dashTime: 0,
     dashX: 1,
     dashY: 0,
@@ -149,12 +194,15 @@ const initialUi: UiState = {
   stage: 1,
   time: 0,
   fever: 0,
+  energy: 0,
+  superOn: false,
 };
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keysRef = useRef(new Set<string>());
   const dashRequestRef = useRef(false);
+  const superRequestRef = useRef(false);
   const gameRef = useRef<Game | null>(null);
   const startGameRef = useRef<() => void>(() => undefined);
   const togglePauseRef = useRef<() => void>(() => undefined);
@@ -163,7 +211,7 @@ export default function Home() {
   const [soundOn, setSoundOn] = useState(true);
   const [ui, setUi] = useState<UiState>(initialUi);
 
-  const tone = useCallback((kind: "spark" | "dash" | "smash" | "hurt" | "fever") => {
+  const tone = useCallback((kind: "spark" | "dash" | "smash" | "hurt" | "fever" | "super") => {
     if (!soundOnRef.current || typeof window === "undefined") return;
     try {
       const AudioCtor = window.AudioContext ||
@@ -180,12 +228,13 @@ export default function Home() {
         smash: [115, 0.12, "sawtooth"],
         hurt: [72, 0.22, "square"],
         fever: [820, 0.32, "triangle"],
+        super: [150, 0.42, "sawtooth"],
       } as const;
       const [frequency, duration, type] = settings[kind];
       oscillator.type = type;
       oscillator.frequency.setValueAtTime(frequency, now);
       oscillator.frequency.exponentialRampToValueAtTime(
-        kind === "fever" ? 1320 : Math.max(45, frequency * 0.72),
+        kind === "fever" || kind === "super" ? 1320 : Math.max(45, frequency * 0.72),
         now + duration,
       );
       gain.gain.setValueAtTime(0.0001, now);
@@ -231,7 +280,7 @@ export default function Home() {
           life: 0.35 + Math.random() * 0.45,
           maxLife: 0.8,
           color,
-          size: 3 + Math.random() * 8,
+          size: 2 + Math.random() * 4.5,
         });
       }
     };
@@ -249,6 +298,8 @@ export default function Home() {
         stage: 1 + Math.floor(game.elapsed / 18),
         time: Math.floor(game.elapsed),
         fever: game.fever,
+        energy: Math.round(game.energy),
+        superOn: game.superOn,
       });
     };
 
@@ -256,6 +307,7 @@ export default function Home() {
       const currentBest = Math.max(game.best, game.score);
       Object.assign(game, initialGame(currentBest), { status: "running" as GameStatus });
       dashRequestRef.current = false;
+      superRequestRef.current = false;
       tone("dash");
       syncUi();
     };
@@ -273,17 +325,23 @@ export default function Home() {
       const player = game.player;
       const oldX = player.x;
       player.x = clamp(player.x + dx, player.r + 18, W - player.r - 18);
-      if (obstacles.some((rect) => circleHitsRect(player, player.r, rect))) player.x = oldX;
+      if (obstacles.some((rect) => circleHitsRect(player, player.r, rect))) {
+        player.x = oldX;
+        player.vx = 0;
+      }
       const oldY = player.y;
       player.y = clamp(player.y + dy, player.r + 22, H - player.r - 22);
-      if (obstacles.some((rect) => circleHitsRect(player, player.r, rect))) player.y = oldY;
+      if (obstacles.some((rect) => circleHitsRect(player, player.r, rect))) {
+        player.y = oldY;
+        player.vy = 0;
+      }
     };
 
     const smashEnemy = (index: number) => {
       const enemy = game.enemies[index];
-      const points = 240 * game.combo * (game.fever > 0 ? 2 : 1);
-      burst(enemy.x, enemy.y, "#ff4e68", 18, 280);
-      burst(enemy.x, enemy.y, "#f2ecd8", 7, 170);
+      const points = 240 * game.combo * (game.fever > 0 || game.superOn ? 2 : 1);
+      burst(enemy.x, enemy.y, "#ff4e68", 13, 260);
+      burst(enemy.x, enemy.y, "#f2ecd8", 6, 160);
       game.impacts.push({ x: enemy.x, y: enemy.y, life: 0.34, maxLife: 0.34 });
       game.slashes.push({
         x: enemy.x,
@@ -310,7 +368,10 @@ export default function Home() {
         return;
       }
       game.elapsed += dt;
+      const prevDashCooldown = game.dashCooldown;
       game.dashCooldown = Math.max(0, game.dashCooldown - dt);
+      if (prevDashCooldown > 0 && game.dashCooldown === 0) game.dashReadyFlash = 0.45;
+      game.dashReadyFlash = Math.max(0, game.dashReadyFlash - dt);
       game.dashTime = Math.max(0, game.dashTime - dt);
       game.invincible = Math.max(0, game.invincible - dt);
       const hadFever = game.fever > 0;
@@ -337,13 +398,41 @@ export default function Home() {
         const length = Math.hypot(mx, my);
         mx /= length;
         my /= length;
-        game.player.faceX = mx;
-        game.player.faceY = my;
+        const faceK = 1 - Math.exp(-13 * dt);
+        game.player.faceX += (mx - game.player.faceX) * faceK;
+        game.player.faceY += (my - game.player.faceY) * faceK;
+        const faceLen = Math.hypot(game.player.faceX, game.player.faceY) || 1;
+        game.player.faceX /= faceLen;
+        game.player.faceY /= faceLen;
+      }
+
+      if (superRequestRef.current && !game.superOn && game.energy >= 100) {
+        game.superOn = true;
+        game.flash = 1;
+        game.shake = 12;
+        game.invincible = Math.max(game.invincible, 0.5);
+        burst(game.player.x, game.player.y, "#f7f047", 30, 340);
+        burst(game.player.x, game.player.y, "#2df4e6", 16, 240);
+        game.popTexts.push({ x: game.player.x, y: game.player.y - 44, life: 0.9, text: "觉醒!!" });
+        tone("super");
+      }
+      superRequestRef.current = false;
+
+      if (game.superOn) {
+        game.energy = Math.max(0, game.energy - SUPER_DRAIN * dt);
+        game.dashCooldown = 0;
+        if (game.energy === 0) {
+          game.superOn = false;
+          game.invincible = Math.max(game.invincible, 0.6);
+          game.flash = 0.5;
+          burst(game.player.x, game.player.y, "#f2ecd8", 14, 170);
+          tone("dash");
+        }
       }
 
       if (dashRequestRef.current && game.dashCooldown === 0) {
         game.dashTime = 0.19;
-        game.dashCooldown = DASH_COOLDOWN;
+        game.dashCooldown = game.superOn ? 0 : DASH_COOLDOWN;
         game.dashX = mx || my ? mx : game.player.faceX;
         game.dashY = mx || my ? my : game.player.faceY;
         burst(game.player.x, game.player.y, "#2df4e6", 9, 145);
@@ -351,10 +440,22 @@ export default function Home() {
       }
       dashRequestRef.current = false;
 
-      const speed = game.dashTime > 0 ? 790 : game.fever > 0 ? 348 : 286;
-      const vx = game.dashTime > 0 ? game.dashX : mx;
-      const vy = game.dashTime > 0 ? game.dashY : my;
-      movePlayer(vx * speed * dt, vy * speed * dt);
+      const maxSpeed = game.superOn ? 430 : game.fever > 0 ? 368 : 300;
+      if (game.dashTime > 0) {
+        game.player.vx = game.dashX * 810;
+        game.player.vy = game.dashY * 810;
+      } else {
+        const accelK = 1 - Math.exp(-(mx || my ? 7.5 : 5.2) * dt);
+        game.player.vx += (mx * maxSpeed - game.player.vx) * accelK;
+        game.player.vy += (my * maxSpeed - game.player.vy) * accelK;
+      }
+      movePlayer(game.player.vx * dt, game.player.vy * dt);
+
+      const targetCamX = clamp(game.player.x - VIEW_W / 2, 0, W - VIEW_W);
+      const targetCamY = clamp(game.player.y - VIEW_H / 2, 0, H - VIEW_H);
+      const camK = 1 - Math.exp(-5.5 * dt);
+      game.camX += (targetCamX - game.camX) * camK;
+      game.camY += (targetCamY - game.camY) * camK;
 
       for (let index = game.sparks.length - 1; index >= 0; index -= 1) {
         const spark = game.sparks[index];
@@ -363,6 +464,7 @@ export default function Home() {
           burst(spark.x, spark.y, "#f7f047", 10, 155);
           game.score += 90 * game.combo;
           game.light += 10;
+          game.energy = Math.min(100, game.energy + ENERGY_PER_SPARK);
           game.dashCooldown = Math.max(0, game.dashCooldown - 0.13);
           game.sparks[index] = makeSpark();
           tone("spark");
@@ -376,11 +478,11 @@ export default function Home() {
         }
       }
 
-      const targetEnemies = Math.min(12, 4 + Math.floor(game.elapsed / 13));
+      const targetEnemies = Math.min(14, 5 + Math.floor(game.elapsed / 12));
       if (game.enemies.length < targetEnemies && game.spawnTimer <= 0) {
-        const enemy = makeEnemy(game.elapsed);
-        if (dist(enemy, game.player) < 240) {
-          enemy.x = enemy.x < W / 2 ? W - 48 : 48;
+        let enemy = makeEnemy(game.elapsed);
+        for (let tries = 0; tries < 24 && dist(enemy, game.player) < 560; tries += 1) {
+          enemy = makeEnemy(game.elapsed);
         }
         game.enemies.push(enemy);
         game.spawnTimer = Math.max(0.38, 1.35 - game.elapsed * 0.012);
@@ -392,13 +494,18 @@ export default function Home() {
         const dy = game.player.y - enemy.y;
         const length = Math.max(1, Math.hypot(dx, dy));
         const sway = Math.sin(game.elapsed * 2.2 + enemy.wobble) * 0.28;
-        enemy.x += (dx / length - (dy / length) * sway) * enemy.speed * dt;
-        enemy.y += (dy / length + (dx / length) * sway) * enemy.speed * dt;
+        const desiredX = (dx / length - (dy / length) * sway) * enemy.speed;
+        const desiredY = (dy / length + (dx / length) * sway) * enemy.speed;
+        const steerK = 1 - Math.exp(-3.1 * dt);
+        enemy.vx += (desiredX - enemy.vx) * steerK;
+        enemy.vy += (desiredY - enemy.vy) * steerK;
+        enemy.x += enemy.vx * dt;
+        enemy.y += enemy.vy * dt;
         enemy.x = clamp(enemy.x, enemy.r + 12, W - enemy.r - 12);
         enemy.y = clamp(enemy.y, enemy.r + 16, H - enemy.r - 16);
 
         if (dist(game.player, enemy) < game.player.r + enemy.r - 4) {
-          if (game.dashTime > 0 || game.fever > 0) {
+          if (game.dashTime > 0 || game.fever > 0 || game.superOn) {
             smashEnemy(index);
           } else if (game.invincible === 0) {
             game.shields -= 1;
@@ -408,7 +515,8 @@ export default function Home() {
             game.shake = 15;
             game.flash = 0.75;
             burst(game.player.x, game.player.y, "#ff4e68", 22, 300);
-            movePlayer((-dx / length) * 58, (-dy / length) * 58);
+            game.player.vx = (-dx / length) * 560;
+            game.player.vy = (-dy / length) * 560;
             tone("hurt");
             if (game.shields <= 0) {
               game.status = "gameover";
@@ -440,6 +548,17 @@ export default function Home() {
       game.popTexts = game.popTexts.filter((pop) => pop.life > 0);
       game.slashes.forEach((slash) => { slash.life -= dt; });
       game.slashes = game.slashes.filter((slash) => slash.life > 0);
+      game.dust.forEach((mote) => {
+        mote.x += mote.vx * dt;
+        mote.y += mote.vy * dt;
+        mote.phase += dt;
+        if (mote.y < -10) {
+          mote.y = H + 10;
+          mote.x = Math.random() * W;
+        }
+        if (mote.x < -10) mote.x = W + 10;
+        else if (mote.x > W + 10) mote.x = -10;
+      });
     };
 
     const roundedRect = (
@@ -456,15 +575,38 @@ export default function Home() {
     const draw = () => {
       const jitterX = game.shake ? (Math.random() - 0.5) * game.shake : 0;
       const jitterY = game.shake ? (Math.random() - 0.5) * game.shake : 0;
+      const camX = game.camX;
+      const camY = game.camY;
+      const viewLeft = camX - 30;
+      const viewTop = camY - 30;
+      const viewRight = camX + VIEW_W + 30;
+      const viewBottom = camY + VIEW_H + 30;
       ctx.save();
-      ctx.translate(jitterX, jitterY);
-      ctx.fillStyle = "#09090b";
-      ctx.fillRect(-20, -20, W + 40, H + 40);
+      ctx.translate(jitterX - camX, jitterY - camY);
+      const sky = ctx.createLinearGradient(0, viewTop, 0, viewBottom);
+      sky.addColorStop(0, "#0c0d16");
+      sky.addColorStop(0.55, "#09090b");
+      sky.addColorStop(1, "#0b0a10");
+      ctx.fillStyle = sky;
+      ctx.fillRect(viewLeft, viewTop, VIEW_W + 60, VIEW_H + 60);
+
+      ambientLights.forEach((glow) => {
+        if (glow.x + glow.r < viewLeft || glow.x - glow.r > viewRight ||
+          glow.y + glow.r < viewTop || glow.y - glow.r > viewBottom) return;
+        const pulse = 0.05 + Math.sin(game.elapsed * 0.9 + glow.x) * 0.016;
+        const gradient = ctx.createRadialGradient(glow.x, glow.y, 0, glow.x, glow.y, glow.r);
+        gradient.addColorStop(0, `rgba(${glow.rgb},${pulse})`);
+        gradient.addColorStop(1, `rgba(${glow.rgb},0)`);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(glow.x - glow.r, glow.y - glow.r, glow.r * 2, glow.r * 2);
+      });
 
       ctx.globalAlpha = 0.1;
       ctx.fillStyle = "#f2ecd8";
-      for (let x = 18; x < W; x += 34) {
-        for (let y = 20; y < H; y += 34) {
+      const dotStartX = Math.floor(viewLeft / 34) * 34 + 18;
+      const dotStartY = Math.floor(viewTop / 34) * 34 + 20;
+      for (let x = dotStartX; x < viewRight; x += 34) {
+        for (let y = dotStartY; y < viewBottom; y += 34) {
           ctx.beginPath();
           ctx.arc(x, y, 1.7, 0, Math.PI * 2);
           ctx.fill();
@@ -472,17 +614,31 @@ export default function Home() {
       }
       ctx.globalAlpha = 1;
 
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = "rgba(45, 244, 230, .1)";
-      for (let line = 0; line < 7; line += 1) {
-        const y = 105 + line * 62 + Math.sin(game.elapsed * 1.8 + line) * 8;
+      const lanternRadius = 200 + (game.superOn ? 130 : game.light * 1.1);
+      const lantern = ctx.createRadialGradient(
+        game.player.x, game.player.y, 20,
+        game.player.x, game.player.y, lanternRadius,
+      );
+      lantern.addColorStop(0, `rgba(242,236,216,${game.fever > 0 ? 0.12 : 0.075})`);
+      lantern.addColorStop(1, "rgba(242,236,216,0)");
+      ctx.fillStyle = lantern;
+      ctx.beginPath();
+      ctx.arc(game.player.x, game.player.y, lanternRadius + 30, 0, Math.PI * 2);
+      ctx.fill();
+
+      game.dust.forEach((mote) => {
+        if (mote.x < viewLeft || mote.x > viewRight || mote.y < viewTop || mote.y > viewBottom) return;
+        ctx.globalAlpha = 0.16 + Math.sin(mote.phase * 2.1) * 0.12;
+        ctx.fillStyle = "#f2ecd8";
         ctx.beginPath();
-        ctx.moveTo(24, y);
-        ctx.lineTo(330 + line * 34, y + 18);
-        ctx.stroke();
-      }
+        ctx.arc(mote.x, mote.y, mote.size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
 
       obstacles.forEach((rect, index) => {
+        if (rect.x + rect.w < viewLeft || rect.x > viewRight ||
+          rect.y + rect.h < viewTop || rect.y > viewBottom) return;
         ctx.fillStyle = "rgba(255, 78, 104, .26)";
         roundedRect(rect.x + 9, rect.y + 11, rect.w, rect.h, 18);
         ctx.fill();
@@ -492,11 +648,33 @@ export default function Home() {
         ctx.lineWidth = 5;
         ctx.strokeStyle = "#f2ecd8";
         ctx.stroke();
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "rgba(45,244,230,.5)";
+        ctx.beginPath();
+        ctx.moveTo(rect.x + 16, rect.y + 7);
+        ctx.lineTo(rect.x + rect.w - 16, rect.y + 7);
+        ctx.stroke();
+        const windows = Math.floor(rect.w / 46);
+        for (let slot = 0; slot < windows; slot += 1) {
+          const lit = Math.sin(game.elapsed * 0.7 + index * 3.1 + slot * 1.7) > 0.15;
+          ctx.fillStyle = lit ? "rgba(247,240,71,.34)" : "rgba(242,236,216,.08)";
+          ctx.fillRect(rect.x + 20 + slot * 46, rect.y + rect.h / 2 - 6, 16, 12);
+        }
       });
 
       game.sparks.forEach((spark) => {
+        if (spark.x < viewLeft - 50 || spark.x > viewRight + 50 ||
+          spark.y < viewTop - 50 || spark.y > viewBottom + 50) return;
         ctx.save();
         ctx.translate(spark.x, spark.y);
+        const glowPulse = 26 + Math.sin(spark.spin * 2) * 5;
+        const halo = ctx.createRadialGradient(0, 0, 2, 0, 0, glowPulse);
+        halo.addColorStop(0, "rgba(247,240,71,.3)");
+        halo.addColorStop(1, "rgba(247,240,71,0)");
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(0, 0, glowPulse, 0, Math.PI * 2);
+        ctx.fill();
         ctx.rotate(spark.spin);
         ctx.fillStyle = "rgba(242,236,216,.22)";
         ctx.beginPath();
@@ -521,6 +699,8 @@ export default function Home() {
       });
 
       game.enemies.forEach((enemy) => {
+        if (enemy.x < viewLeft - 60 || enemy.x > viewRight + 60 ||
+          enemy.y < viewTop - 60 || enemy.y > viewBottom + 60) return;
         const wobble = Math.sin(game.elapsed * 4 + enemy.wobble) * 2.5;
         ctx.save();
         ctx.translate(enemy.x, enemy.y);
@@ -564,17 +744,17 @@ export default function Home() {
         ctx.translate(impact.x, impact.y);
         ctx.globalAlpha = 1 - progress;
         ctx.strokeStyle = "#f2ecd8";
-        ctx.lineWidth = 8 - progress * 5;
+        ctx.lineWidth = 2.4 - progress * 1.6;
         ctx.beginPath();
-        ctx.arc(0, 0, 18 + progress * 62, 0, Math.PI * 2);
+        ctx.arc(0, 0, 16 + progress * 74, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.strokeStyle = "#ff4e68";
-        ctx.lineWidth = 4;
-        for (let ray = 0; ray < 8; ray += 1) {
-          const angle = (Math.PI * 2 * ray) / 8;
+        ctx.strokeStyle = "rgba(255,78,104,.85)";
+        ctx.lineWidth = 1.4;
+        for (let ray = 0; ray < 6; ray += 1) {
+          const angle = (Math.PI * 2 * ray) / 6 + progress * 0.6;
           ctx.beginPath();
-          ctx.moveTo(Math.cos(angle) * (24 + progress * 18), Math.sin(angle) * (24 + progress * 18));
-          ctx.lineTo(Math.cos(angle) * (44 + progress * 46), Math.sin(angle) * (44 + progress * 46));
+          ctx.moveTo(Math.cos(angle) * (22 + progress * 30), Math.sin(angle) * (22 + progress * 30));
+          ctx.lineTo(Math.cos(angle) * (40 + progress * 58), Math.sin(angle) * (40 + progress * 58));
           ctx.stroke();
         }
         ctx.restore();
@@ -582,38 +762,36 @@ export default function Home() {
 
       game.slashes.forEach((slash) => {
         const progress = 1 - slash.life / slash.maxLife;
-        const alpha = 1 - progress;
+        const ease = 1 - Math.pow(1 - progress, 3);
+        const radius = 42 + ease * 38;
+        const sweep = 1.25;
         ctx.save();
         ctx.translate(slash.x, slash.y);
-        ctx.rotate(slash.angle);
-        ctx.scale(0.82 + progress * 0.62, 0.82 + progress * 0.62);
-        ctx.globalAlpha = alpha;
+        ctx.rotate(slash.angle - 0.3 + ease * 0.6);
+        ctx.globalAlpha = 1 - progress;
         ctx.lineCap = "round";
-        ctx.strokeStyle = "rgba(255,78,104,.8)";
-        ctx.lineWidth = 19;
+        ctx.strokeStyle = "rgba(45,244,230,.32)";
+        ctx.lineWidth = 6;
         ctx.beginPath();
-        ctx.moveTo(-42, -46);
-        ctx.quadraticCurveTo(40, 0, -42, 46);
+        ctx.arc(0, 0, radius, -sweep, sweep);
         ctx.stroke();
-        ctx.strokeStyle = "#f2ecd8";
-        ctx.lineWidth = 11;
+        ctx.fillStyle = "#ffffff";
         ctx.beginPath();
-        ctx.moveTo(-42, -46);
-        ctx.quadraticCurveTo(40, 0, -42, 46);
-        ctx.stroke();
-        ctx.strokeStyle = "#2df4e6";
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(-42, -46);
-        ctx.quadraticCurveTo(40, 0, -42, 46);
-        ctx.stroke();
-        ctx.fillStyle = "#f7f047";
-        ctx.beginPath();
-        ctx.moveTo(42, 0);
-        ctx.lineTo(55, -5);
-        ctx.lineTo(49, 7);
+        ctx.arc(0, 0, radius, -sweep, sweep);
+        ctx.arc(-7, 0, radius, sweep, -sweep, true);
         ctx.closePath();
         ctx.fill();
+        ctx.strokeStyle = "rgba(45,244,230,.9)";
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius + 1.6, -sweep * 0.88, sweep * 0.88);
+        ctx.stroke();
+        ctx.globalAlpha = (1 - progress) * 0.4;
+        ctx.strokeStyle = "#f2ecd8";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius * 0.6, Math.PI - sweep * 0.65, Math.PI + sweep * 0.65);
+        ctx.stroke();
         ctx.restore();
       });
 
@@ -670,6 +848,22 @@ export default function Home() {
           ctx.arc(0, 0, 39 + Math.sin(game.elapsed * 8) * 4, 0, Math.PI * 2);
           ctx.stroke();
         }
+        if (game.superOn) {
+          ctx.strokeStyle = `rgba(247,240,71,${0.5 + Math.sin(game.elapsed * 10) * 0.2})`;
+          ctx.lineWidth = 3;
+          ctx.setLineDash([14, 10]);
+          ctx.lineDashOffset = -game.elapsed * 70;
+          ctx.beginPath();
+          ctx.arc(0, 0, 46, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = "rgba(45,244,230,.65)";
+          ctx.lineWidth = 1.6;
+          ctx.lineDashOffset = game.elapsed * 90;
+          ctx.beginPath();
+          ctx.arc(0, 0, 55, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
         ctx.fillStyle = "rgba(255,78,104,.32)";
         ctx.beginPath();
         ctx.ellipse(7, 32, 31, 10, 0, 0, Math.PI * 2);
@@ -703,7 +897,7 @@ export default function Home() {
 
         const bagWarning = game.fever > 0 && game.fever <= 1.5;
         const bagPulse = bagWarning && Math.floor(game.elapsed * 14) % 2 === 0;
-        const bagCharge = game.fever > 0 ? 1 : game.light / 100;
+        const bagCharge = game.fever > 0 || game.superOn ? 1 : game.light / 100;
         const bagX = -player.faceY * 20 - player.faceX * 9;
         const bagY = player.faceX * 20 - player.faceY * 9;
         ctx.save();
@@ -732,66 +926,187 @@ export default function Home() {
         ctx.fillRect(-6, 13 - bagCharge * 13, 12, 4 + bagCharge * 13);
         ctx.restore();
 
-        const swordAngle = Math.atan2(player.faceY, player.faceX);
-        ctx.save();
-        ctx.rotate(swordAngle);
-        ctx.translate(game.dashTime > 0 ? 22 : 17, 7);
-        if (game.dashTime > 0) {
-          ctx.shadowColor = "#2df4e6";
-          ctx.shadowBlur = 18;
+        const dashReady = game.dashCooldown === 0;
+        const lampY = -50;
+        if (dashReady && game.dashReadyFlash > 0) {
+          const flashP = 1 - game.dashReadyFlash / 0.45;
+          ctx.globalAlpha = 1 - flashP;
+          ctx.strokeStyle = "#2df4e6";
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(0, lampY, 8 + flashP * 22, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
         }
-        ctx.strokeStyle = "#09090b";
-        ctx.lineWidth = 9;
-        ctx.beginPath();
-        ctx.moveTo(-6, 0);
-        ctx.lineTo(18, 0);
-        ctx.stroke();
-        ctx.strokeStyle = "#ff4e68";
-        ctx.lineWidth = 5;
-        ctx.beginPath();
-        ctx.moveTo(-5, 0);
-        ctx.lineTo(18, 0);
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = "#09090b";
-        ctx.lineWidth = 7;
-        ctx.beginPath();
-        ctx.moveTo(18, -12);
-        ctx.lineTo(18, 12);
-        ctx.stroke();
-        ctx.strokeStyle = "#f7f047";
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(18, -11);
-        ctx.lineTo(18, 11);
-        ctx.stroke();
-        ctx.fillStyle = "#f2ecd8";
-        ctx.strokeStyle = "#09090b";
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(20, -6);
-        ctx.lineTo(game.dashTime > 0 ? 70 : 57, -3);
-        ctx.lineTo(game.dashTime > 0 ? 82 : 67, 0);
-        ctx.lineTo(game.dashTime > 0 ? 70 : 57, 6);
-        ctx.lineTo(20, 6);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        ctx.strokeStyle = "#2df4e6";
+        if (dashReady) {
+          const lampHalo = ctx.createRadialGradient(0, lampY, 1, 0, lampY, 17);
+          lampHalo.addColorStop(0, "rgba(45,244,230,.55)");
+          lampHalo.addColorStop(1, "rgba(45,244,230,0)");
+          ctx.fillStyle = lampHalo;
+          ctx.beginPath();
+          ctx.arc(0, lampY, 17, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.strokeStyle = "rgba(242,236,216,.8)";
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(25, -2);
-        ctx.lineTo(game.dashTime > 0 ? 71 : 58, 0);
+        ctx.moveTo(0, -32);
+        ctx.lineTo(0, lampY + 6);
         ctx.stroke();
+        ctx.fillStyle = dashReady ? "#2df4e6" : "rgba(45,244,230,.16)";
+        ctx.strokeStyle = dashReady ? "#f2ecd8" : "rgba(242,236,216,.5)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, lampY, 5.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        if (!dashReady) {
+          const cooldownP = 1 - game.dashCooldown / DASH_COOLDOWN;
+          ctx.strokeStyle = "rgba(45,244,230,.8)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, lampY, 9, -Math.PI / 2, -Math.PI / 2 + cooldownP * Math.PI * 2);
+          ctx.stroke();
+        }
+
+        const swordAngle = Math.atan2(player.faceY, player.faceX) + Math.sin(game.elapsed * 2.6) * 0.05;
+        const reach = game.dashTime > 0 ? 12 : 0;
+        ctx.save();
+        ctx.rotate(swordAngle);
+        ctx.translate(16 + reach, 9);
+        ctx.rotate(-0.16);
+        if (game.dashTime > 0) {
+          ctx.shadowColor = "#2df4e6";
+          ctx.shadowBlur = 16;
+        }
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "#14141a";
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(-2, 0);
+        ctx.lineTo(12, 0);
+        ctx.stroke();
+        ctx.strokeStyle = "#ff4e68";
+        ctx.lineWidth = 1.4;
+        for (let wrap = 0; wrap < 3; wrap += 1) {
+          ctx.beginPath();
+          ctx.moveTo(1 + wrap * 4, -2.4);
+          ctx.lineTo(3 + wrap * 4, 2.4);
+          ctx.stroke();
+        }
+        ctx.fillStyle = "#f7f047";
+        ctx.strokeStyle = "#09090b";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(14, 0, 2.6, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        const tip = 64 + reach;
+        const blade = ctx.createLinearGradient(16, 0, tip, 0);
+        blade.addColorStop(0, "#cfd4d6");
+        blade.addColorStop(0.6, "#f4f7f5");
+        blade.addColorStop(1, "#ffffff");
+        ctx.fillStyle = blade;
+        ctx.beginPath();
+        ctx.moveTo(16, -2.2);
+        ctx.quadraticCurveTo((16 + tip) / 2, -4.6, tip, -0.6);
+        ctx.quadraticCurveTo(tip + 3.5, 0.2, tip - 1, 1.1);
+        ctx.quadraticCurveTo((16 + tip) / 2, 2.4, 16, 2.2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "rgba(9,9,11,.65)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(45,244,230,.85)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(18, -1.5);
+        ctx.quadraticCurveTo((16 + tip) / 2, -3.4, tip - 2, -0.4);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
         ctx.restore();
         ctx.restore();
       }
 
+      ctx.restore();
+
+      const vignette = ctx.createRadialGradient(
+        VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.42,
+        VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.88,
+      );
+      vignette.addColorStop(0, "rgba(5,5,8,0)");
+      vignette.addColorStop(1, "rgba(5,5,8,.5)");
+      ctx.fillStyle = vignette;
+      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+      if (game.superOn) {
+        const pulse = 0.55 + Math.sin(game.elapsed * 8) * 0.25;
+        const aura = ctx.createRadialGradient(
+          VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.5,
+          VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.9,
+        );
+        aura.addColorStop(0, "rgba(247,240,71,0)");
+        aura.addColorStop(1, `rgba(247,240,71,${0.14 * pulse})`);
+        ctx.fillStyle = aura;
+        ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+        ctx.strokeStyle = `rgba(247,240,71,${0.3 + pulse * 0.4})`;
+        ctx.lineWidth = 6;
+        ctx.strokeRect(7, 7, VIEW_W - 14, VIEW_H - 14);
+        ctx.strokeStyle = "rgba(45,244,230,.75)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([30, 20]);
+        ctx.lineDashOffset = -game.elapsed * 120;
+        ctx.strokeRect(15, 15, VIEW_W - 30, VIEW_H - 30);
+        ctx.setLineDash([]);
+      }
+
       if (game.flash > 0) {
         ctx.fillStyle = `rgba(242,236,216,${game.flash * 0.24})`;
-        ctx.fillRect(0, 0, W, H);
+        ctx.fillRect(0, 0, VIEW_W, VIEW_H);
       }
-      ctx.restore();
+
+      if (game.status === "running" || game.status === "paused") {
+        const mapW = 156;
+        const mapH = (mapW * H) / W;
+        const mapX = VIEW_W - mapW - 16;
+        const mapY = VIEW_H - mapH - 16;
+        const scale = mapW / W;
+        ctx.save();
+        ctx.globalAlpha = 0.88;
+        ctx.fillStyle = "rgba(9,9,11,.78)";
+        ctx.strokeStyle = "rgba(242,236,216,.7)";
+        ctx.lineWidth = 2;
+        roundedRect(mapX, mapY, mapW, mapH, 6);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "rgba(242,236,216,.28)";
+        obstacles.forEach((rect) => {
+          ctx.fillRect(
+            mapX + rect.x * scale,
+            mapY + rect.y * scale,
+            Math.max(2, rect.w * scale),
+            Math.max(2, rect.h * scale),
+          );
+        });
+        ctx.fillStyle = "#f7f047";
+        game.sparks.forEach((spark) => {
+          ctx.fillRect(mapX + spark.x * scale - 1, mapY + spark.y * scale - 1, 2, 2);
+        });
+        ctx.fillStyle = "#ff4e68";
+        game.enemies.forEach((enemy) => {
+          ctx.beginPath();
+          ctx.arc(mapX + enemy.x * scale, mapY + enemy.y * scale, 2.4, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.strokeStyle = "rgba(45,244,230,.55)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(mapX + camX * scale, mapY + camY * scale, VIEW_W * scale, VIEW_H * scale);
+        ctx.fillStyle = "#2df4e6";
+        ctx.beginPath();
+        ctx.arc(mapX + game.player.x * scale, mapY + game.player.y * scale, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
     };
 
     const loop = (now: number) => {
@@ -815,12 +1130,18 @@ export default function Home() {
         togglePause();
         return;
       }
+      if ((event.code === "Enter" || event.code === "Space") && game.status === "paused") {
+        event.preventDefault();
+        togglePause();
+        return;
+      }
       if ((event.code === "Enter" || event.code === "Space") &&
         (game.status === "menu" || game.status === "gameover")) {
         startGame();
         return;
       }
       if (event.code === "Space" && !event.repeat) dashRequestRef.current = true;
+      if (event.code === "KeyR" && !event.repeat) superRequestRef.current = true;
       keysRef.current.add(event.code);
     };
     const onKeyUp = (event: KeyboardEvent) => keysRef.current.delete(event.code);
@@ -865,8 +1186,8 @@ export default function Home() {
     ui.status === "gameover"
       ? `本轮 ${ui.score.toLocaleString("zh-CN")} 分，最高 ${ui.best.toLocaleString("zh-CN")} 分`
       : ui.status === "paused"
-        ? "影子也暂停了。按 P 或继续按钮返回。"
-        : "捡光点填满灯袋。冲刺会挥剑斩碎影子，连续击杀会提高倍率。";
+        ? "影子也暂停了。按空格 / 回车 / P 原地继续。"
+        : "捡光点填满灯袋，同时给总能量充能。冲刺会挥剑斩碎影子，能量满后按 R 觉醒。";
 
   return (
     <main className="game-page">
@@ -907,12 +1228,12 @@ export default function Home() {
         </header>
 
         <div className="arena-wrap">
-          <div className={`arena-frame ${ui.fever > 0 ? "is-fever" : ""} ${ui.fever > 0 && ui.fever <= 1.5 ? "is-expiring" : ""}`}>
+          <div className={`arena-frame ${ui.superOn ? "is-super" : ""} ${ui.fever > 0 ? "is-fever" : ""} ${ui.fever > 0 && ui.fever <= 1.5 ? "is-expiring" : ""}`}>
             <canvas
               ref={canvasRef}
               className="game-canvas"
-              width={W}
-              height={H}
+              width={VIEW_W}
+              height={VIEW_H}
               aria-label="游戏区域：使用 WASD 或方向键移动，空格冲刺"
             />
 
@@ -925,7 +1246,7 @@ export default function Home() {
               </div>
             </div>
             <div className="arena-status status-right">
-              <span>{ui.fever > 0 ? `发光 ${ui.fever.toFixed(1)}s` : `第 ${ui.stage} 轮 · ${ui.time}s`}</span>
+              <span>{ui.superOn ? "觉醒形态!!" : ui.fever > 0 ? `发光 ${ui.fever.toFixed(1)}s` : `第 ${ui.stage} 轮 · ${ui.time}s`}</span>
             </div>
 
             {ui.status !== "running" && (
@@ -937,12 +1258,18 @@ export default function Home() {
                   </p>
                   <h2>{overlayTitle}</h2>
                   <p>{overlayCopy}</p>
-                  <button className="start-button" type="button" onClick={() => startGameRef.current()}>
-                    {ui.status === "gameover" ? "再偷一轮" : ui.status === "paused" ? "重新开始" : "开始遛影子"}
-                  </button>
-                  {ui.status === "paused" && (
-                    <button className="resume-button" type="button" onClick={() => togglePauseRef.current()}>
-                      原地继续
+                  {ui.status === "paused" ? (
+                    <>
+                      <button className="start-button" type="button" autoFocus onClick={() => togglePauseRef.current()}>
+                        原地继续
+                      </button>
+                      <button className="resume-button" type="button" onClick={() => startGameRef.current()}>
+                        重新开始
+                      </button>
+                    </>
+                  ) : (
+                    <button className="start-button" type="button" onClick={() => startGameRef.current()}>
+                      {ui.status === "gameover" ? "再偷一轮" : "开始遛影子"}
                     </button>
                   )}
                 </div>
@@ -960,6 +1287,8 @@ export default function Home() {
             <span className="legend-copy">移动</span>
             <span className="keycap wide">SPACE</span>
             <span className="legend-copy">冲刺</span>
+            <span className="keycap">R</span>
+            <span className="legend-copy">觉醒</span>
             <span className="keycap">P</span>
             <span className="legend-copy">暂停</span>
           </div>
@@ -972,6 +1301,13 @@ export default function Home() {
             <div className="meter-block">
               <div className="meter-label"><span>冲刺</span><strong>{ui.dash >= 1 ? "READY" : `${Math.round(ui.dash * 100)}%`}</strong></div>
               <div className="meter-track dash-track"><i style={{ width: `${ui.dash * 100}%` }} /></div>
+            </div>
+            <div className={`meter-block ${ui.energy >= 100 && !ui.superOn ? "is-ready" : ""} ${ui.superOn ? "is-super" : ""}`}>
+              <div className="meter-label">
+                <span>总能量</span>
+                <strong>{ui.superOn ? "觉醒中!!" : ui.energy >= 100 ? "按 R 觉醒!" : `${ui.energy}%`}</strong>
+              </div>
+              <div className="meter-track energy-track"><i style={{ width: `${ui.energy}%` }} /></div>
             </div>
           </div>
 
@@ -1020,6 +1356,12 @@ export default function Home() {
               onPointerDown={() => { dashRequestRef.current = true; }}
               aria-label="冲刺"
             >冲刺</button>
+            <button
+              className="dash-button awaken-button"
+              type="button"
+              onPointerDown={() => { superRequestRef.current = true; }}
+              aria-label="觉醒"
+            >觉醒</button>
           </div>
         </footer>
       </section>
