@@ -384,7 +384,11 @@ export default function Home() {
       game.dashCooldown = Math.max(0, game.dashCooldown - dt);
       if (prevDashCooldown > 0 && game.dashCooldown === 0) game.dashReadyFlash = 0.45;
       game.dashReadyFlash = Math.max(0, game.dashReadyFlash - dt);
+      const prevDashTime = game.dashTime;
       game.dashTime = Math.max(0, game.dashTime - dt);
+      if (prevDashTime > 0 && game.dashTime === 0) {
+        game.invincible = Math.max(game.invincible, 0.22);
+      }
       game.invincible = Math.max(0, game.invincible - dt);
       const hadFever = game.fever > 0;
       game.fever = Math.max(0, game.fever - dt);
@@ -469,8 +473,8 @@ export default function Home() {
             x: game.player.x,
             y: game.player.y,
             angle: Math.atan2(game.dashY, game.dashX),
-            life: 0.34,
-            maxLife: 0.34,
+            life: 1,
+            maxLife: 1,
           });
         }
       } else {
@@ -490,7 +494,7 @@ export default function Home() {
           burst(spark.x, spark.y, "#f7f047", 10, 155);
           game.score += 90 * game.combo;
           game.light = Math.min(100, game.light + 10);
-          game.energy = Math.min(100, game.energy + ENERGY_PER_SPARK);
+          if (!game.superOn) game.energy = Math.min(100, game.energy + ENERGY_PER_SPARK);
           game.dashCooldown = Math.max(0, game.dashCooldown - 0.13);
           game.sparks[index] = makeSpark();
           tone("spark");
@@ -539,7 +543,7 @@ export default function Home() {
         if (game.dashTime > 0 && gap < dashKillRange) {
           smashEnemy(index);
         } else if (gap < touchRange) {
-          if (game.invincible === 0 && game.fever === 0) {
+          if (game.dashTime === 0 && game.invincible === 0 && game.fever === 0) {
             game.shields -= 1;
             game.combo = 1;
             game.comboTimer = 0;
@@ -821,14 +825,14 @@ export default function Home() {
         ctx.translate(trail.x, trail.y);
         ctx.rotate(trail.angle);
         ctx.globalAlpha = (1 - progress) * 0.75;
-        ctx.fillStyle = "rgba(45,244,230,.3)";
+        ctx.fillStyle = "rgba(16,108,224,.42)";
         ctx.beginPath();
         ctx.moveTo(-len * 1.15, 0);
         ctx.quadraticCurveTo(0, -width * 2.4, len * 1.15, 0);
         ctx.quadraticCurveTo(0, width * 2.4, -len * 1.15, 0);
         ctx.closePath();
         ctx.fill();
-        ctx.fillStyle = "rgba(242,252,250,.85)";
+        ctx.fillStyle = "rgba(120,190,255,.88)";
         ctx.beginPath();
         ctx.moveTo(-len, 0);
         ctx.quadraticCurveTo(0, -width, len, 0);
