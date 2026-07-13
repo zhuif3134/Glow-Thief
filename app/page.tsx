@@ -447,8 +447,12 @@ export default function Home() {
       if (dashRequestRef.current && game.dashCooldown === 0) {
         game.dashTime = game.superOn ? 0.31 : 0.19;
         game.dashCooldown = game.superOn ? 0 : DASH_COOLDOWN;
-        game.dashX = mx || my ? mx : game.player.faceX;
-        game.dashY = mx || my ? my : game.player.faceY;
+        const moving = Math.hypot(game.player.vx, game.player.vy) > 40;
+        const aimX = moving ? game.player.faceX : mx || my ? mx : game.player.faceX;
+        const aimY = moving ? game.player.faceY : mx || my ? my : game.player.faceY;
+        const aimLength = Math.hypot(aimX, aimY) || 1;
+        game.dashX = aimX / aimLength;
+        game.dashY = aimY / aimLength;
         burst(game.player.x, game.player.y, "#2df4e6", 9, 145);
         tone("dash");
       }
@@ -456,6 +460,14 @@ export default function Home() {
 
       const maxSpeed = game.superOn ? 507 : game.fever > 0 ? 478 : 390;
       if (game.dashTime > 0) {
+        if (game.superOn && (mx || my)) {
+          const steerK = 1 - Math.exp(-10 * dt);
+          game.dashX += (game.player.faceX - game.dashX) * steerK;
+          game.dashY += (game.player.faceY - game.dashY) * steerK;
+          const dashLength = Math.hypot(game.dashX, game.dashY) || 1;
+          game.dashX /= dashLength;
+          game.dashY /= dashLength;
+        }
         game.player.vx = game.dashX * 810;
         game.player.vy = game.dashY * 810;
       } else {
