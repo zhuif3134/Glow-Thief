@@ -277,7 +277,6 @@ export default function Home() {
     let last = performance.now();
     let uiTimer = 0;
     let frame = 0;
-    let pointerAim: Point | null = null;
 
     const burst = (x: number, y: number, color: string, count: number, force = 210) => {
       for (let index = 0; index < count; index += 1) {
@@ -448,13 +447,9 @@ export default function Home() {
       if (dashRequestRef.current && game.dashCooldown === 0) {
         game.dashTime = game.superOn ? 0.31 : 0.19;
         game.dashCooldown = game.superOn ? 0 : DASH_COOLDOWN;
-        const moving = Math.hypot(game.player.vx, game.player.vy) > 40;
-        let aimX = moving ? game.player.faceX : mx || my ? mx : game.player.faceX;
-        let aimY = moving ? game.player.faceY : mx || my ? my : game.player.faceY;
-        if (pointerAim) {
-          aimX = pointerAim.x;
-          aimY = pointerAim.y;
-        }
+        const hasMoveInput = Boolean(mx || my);
+        const aimX = hasMoveInput ? mx + game.player.faceX * 0.55 : game.player.faceX;
+        const aimY = hasMoveInput ? my + game.player.faceY * 0.55 : game.player.faceY;
         const aimLength = Math.hypot(aimX, aimY) || 1;
         game.dashX = aimX / aimLength;
         game.dashY = aimY / aimLength;
@@ -1268,26 +1263,10 @@ export default function Home() {
     const onVisibility = () => {
       if (document.hidden && game.status === "running") togglePause();
     };
-    const onPointerMove = (event: PointerEvent) => {
-      if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
-      const rect = canvas.getBoundingClientRect();
-      const pointerX = ((event.clientX - rect.left) / rect.width) * canvas.width;
-      const pointerY = ((event.clientY - rect.top) / rect.height) * canvas.height;
-      const aimX = pointerX - canvas.width / 2;
-      const aimY = pointerY - canvas.height / 2;
-      const aimLength = Math.hypot(aimX, aimY);
-      if (aimLength > 24) {
-        pointerAim = { x: aimX / aimLength, y: aimY / aimLength };
-      }
-    };
-    const onPointerLeave = () => { pointerAim = null; };
-
     window.addEventListener("keydown", onKeyDown, { passive: false });
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
     document.addEventListener("visibilitychange", onVisibility);
-    canvas.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerleave", onPointerLeave);
     frame = requestAnimationFrame(loop);
 
     return () => {
@@ -1296,8 +1275,6 @@ export default function Home() {
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", onVisibility);
-      canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("pointerleave", onPointerLeave);
     };
   }, [tone]);
 
@@ -1320,7 +1297,7 @@ export default function Home() {
       ? `本轮 ${ui.score.toLocaleString("zh-CN")} 分，最高 ${ui.best.toLocaleString("zh-CN")} 分`
       : ui.status === "paused"
         ? "影子也暂停了。按空格 / 回车 / P 原地继续。"
-        : "捡光点充能：灯袋满按 R 无敌发光，总能量满按 Q 觉醒狂飙。鼠标瞄准，空格直线冲刺。";
+        : "捡光点充能：灯袋满按 R 无敌发光，总能量满按 Q 觉醒狂飙。移动决定方向，空格直线冲刺。";
 
   return (
     <main className="game-page">
@@ -1367,7 +1344,7 @@ export default function Home() {
               className="game-canvas"
               width={VIEW_W}
               height={VIEW_H}
-              aria-label="游戏区域：使用 WASD 或方向键移动，鼠标瞄准，空格直线冲刺"
+              aria-label="游戏区域：使用 WASD 或方向键移动并决定冲刺方向，空格直线冲刺"
             />
 
             <div className="arena-status status-left">
@@ -1418,8 +1395,6 @@ export default function Home() {
             <span className="keycap">S</span>
             <span className="keycap">D</span>
             <span className="legend-copy">移动</span>
-            <span className="keycap wide">MOUSE</span>
-            <span className="legend-copy">瞄准</span>
             <span className="keycap wide">SPACE</span>
             <span className="legend-copy">冲刺</span>
             <span className="keycap">R</span>
