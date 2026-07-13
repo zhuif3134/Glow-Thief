@@ -277,6 +277,7 @@ export default function Home() {
     let last = performance.now();
     let uiTimer = 0;
     let frame = 0;
+    let pointerAim: Point | null = null;
 
     const burst = (x: number, y: number, color: string, count: number, force = 210) => {
       for (let index = 0; index < count; index += 1) {
@@ -448,11 +449,21 @@ export default function Home() {
         game.dashTime = game.superOn ? 0.31 : 0.19;
         game.dashCooldown = game.superOn ? 0 : DASH_COOLDOWN;
         const moving = Math.hypot(game.player.vx, game.player.vy) > 40;
-        const aimX = moving ? game.player.faceX : mx || my ? mx : game.player.faceX;
-        const aimY = moving ? game.player.faceY : mx || my ? my : game.player.faceY;
+        let aimX = moving ? game.player.faceX : mx || my ? mx : game.player.faceX;
+        let aimY = moving ? game.player.faceY : mx || my ? my : game.player.faceY;
+        if (pointerAim) {
+          const pointerX = pointerAim.x - (game.player.x - game.camX);
+          const pointerY = pointerAim.y - (game.player.y - game.camY);
+          if (Math.hypot(pointerX, pointerY) > 24) {
+            aimX = pointerX;
+            aimY = pointerY;
+          }
+        }
         const aimLength = Math.hypot(aimX, aimY) || 1;
         game.dashX = aimX / aimLength;
         game.dashY = aimY / aimLength;
+        game.player.faceX = game.dashX;
+        game.player.faceY = game.dashY;
         burst(game.player.x, game.player.y, "#2df4e6", 9, 145);
         tone("dash");
       }
@@ -460,14 +471,6 @@ export default function Home() {
 
       const maxSpeed = game.superOn ? 507 : game.fever > 0 ? 478 : 390;
       if (game.dashTime > 0) {
-        if (game.superOn && (mx || my)) {
-          const steerK = 1 - Math.exp(-10 * dt);
-          game.dashX += (game.player.faceX - game.dashX) * steerK;
-          game.dashY += (game.player.faceY - game.dashY) * steerK;
-          const dashLength = Math.hypot(game.dashX, game.dashY) || 1;
-          game.dashX /= dashLength;
-          game.dashY /= dashLength;
-        }
         game.player.vx = game.dashX * 810;
         game.player.vy = game.dashY * 810;
       } else {
@@ -1269,11 +1272,22 @@ export default function Home() {
     const onVisibility = () => {
       if (document.hidden && game.status === "running") togglePause();
     };
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+      const rect = canvas.getBoundingClientRect();
+      pointerAim = {
+        x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+        y: ((event.clientY - rect.top) / rect.height) * canvas.height,
+      };
+    };
+    const onPointerLeave = () => { pointerAim = null; };
 
     window.addEventListener("keydown", onKeyDown, { passive: false });
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
     document.addEventListener("visibilitychange", onVisibility);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerleave", onPointerLeave);
     frame = requestAnimationFrame(loop);
 
     return () => {
@@ -1282,6 +1296,8 @@ export default function Home() {
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", onVisibility);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
     };
   }, [tone]);
 
@@ -1304,7 +1320,7 @@ export default function Home() {
       ? `本轮 ${ui.score.toLocaleString("zh-CN")} 分，最高 ${ui.best.toLocaleString("zh-CN")} 分`
       : ui.status === "paused"
         ? "影子也暂停了。按空格 / 回车 / P 原地继续。"
-        : "捡光点充能：灯袋满按 R 无敌发光，总能量满按 Q 觉醒狂飙。冲刺挥剑斩碎影子。";
+        : "捡光点充能：灯袋满按 R 无敌发光，总能量满按 Q 觉醒狂飙。鼠标瞄准，空格直线冲刺。";
 
   return (
     <main className="game-page">
@@ -1351,7 +1367,7 @@ export default function Home() {
               className="game-canvas"
               width={VIEW_W}
               height={VIEW_H}
-              aria-label="游戏区域：使用 WASD 或方向键移动，空格冲刺"
+              aria-label="游戏区域：使用 WASD 或方向键移动，鼠标瞄准，空格直线冲刺"
             />
 
             <div className="arena-status status-left">
@@ -1402,6 +1418,8 @@ export default function Home() {
             <span className="keycap">S</span>
             <span className="keycap">D</span>
             <span className="legend-copy">移动</span>
+            <span className="keycap wide">MOUSE</span>
+            <span className="legend-copy">瞄准</span>
             <span className="keycap wide">SPACE</span>
             <span className="legend-copy">冲刺</span>
             <span className="keycap">R</span>
