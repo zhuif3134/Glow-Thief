@@ -452,12 +452,8 @@ export default function Home() {
         let aimX = moving ? game.player.faceX : mx || my ? mx : game.player.faceX;
         let aimY = moving ? game.player.faceY : mx || my ? my : game.player.faceY;
         if (pointerAim) {
-          const pointerX = pointerAim.x - (game.player.x - game.camX);
-          const pointerY = pointerAim.y - (game.player.y - game.camY);
-          if (Math.hypot(pointerX, pointerY) > 24) {
-            aimX = pointerX;
-            aimY = pointerY;
-          }
+          aimX = pointerAim.x;
+          aimY = pointerAim.y;
         }
         const aimLength = Math.hypot(aimX, aimY) || 1;
         game.dashX = aimX / aimLength;
@@ -1275,10 +1271,14 @@ export default function Home() {
     const onPointerMove = (event: PointerEvent) => {
       if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
       const rect = canvas.getBoundingClientRect();
-      pointerAim = {
-        x: ((event.clientX - rect.left) / rect.width) * canvas.width,
-        y: ((event.clientY - rect.top) / rect.height) * canvas.height,
-      };
+      const pointerX = ((event.clientX - rect.left) / rect.width) * canvas.width;
+      const pointerY = ((event.clientY - rect.top) / rect.height) * canvas.height;
+      const aimX = pointerX - (game.player.x - game.camX);
+      const aimY = pointerY - (game.player.y - game.camY);
+      const aimLength = Math.hypot(aimX, aimY);
+      if (aimLength > 24) {
+        pointerAim = { x: aimX / aimLength, y: aimY / aimLength };
+      }
     };
     const onPointerLeave = () => { pointerAim = null; };
 
