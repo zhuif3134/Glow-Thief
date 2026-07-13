@@ -1273,8 +1273,8 @@ export default function Home() {
       const rect = canvas.getBoundingClientRect();
       const pointerX = ((event.clientX - rect.left) / rect.width) * canvas.width;
       const pointerY = ((event.clientY - rect.top) / rect.height) * canvas.height;
-      const aimX = pointerX - (game.player.x - game.camX);
-      const aimY = pointerY - (game.player.y - game.camY);
+      const aimX = pointerX - canvas.width / 2;
+      const aimY = pointerY - canvas.height / 2;
       const aimLength = Math.hypot(aimX, aimY);
       if (aimLength > 24) {
         pointerAim = { x: aimX / aimLength, y: aimY / aimLength };
