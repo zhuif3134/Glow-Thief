@@ -1,98 +1,104 @@
-# vinext-starter
+# 夜光小贼 · Glow Thief
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+一款午夜漫画风的短局制 2D 街机小游戏。收集光点、避开影子，用冲刺击碎敌人并维持连击；积满灯袋后进入发光状态，积满总能量后开启觉醒形态。
 
-## Prerequisites
+> 当前状态：**Alpha / 可游玩原型**。核心循环、键盘与触屏操作、音效、暂停、最高分记录均已实现；关卡内容和平衡仍在迭代。
 
-- Node.js `>=22.13.0`
+## 截图
 
-## Quick Start
+![夜光小贼实际游戏画面](./public/screenshots/gameplay.png)
+
+<details>
+<summary>宣传图</summary>
+
+![夜光小贼宣传图](./public/og.png)
+
+</details>
+
+## 游戏玩法
+
+- 收集黄色光点来提高分数、连击、灯袋和觉醒能量。
+- 使用冲刺击碎影子。冲刺期间拥有短暂无敌时间。
+- 灯袋充满后按 `R` 进入短暂发光状态。
+- 总能量充满后按 `Q` 开启觉醒形态。
+- 被影子碰到会失去护盾；护盾耗尽后本轮结束。
+
+### 操作
+
+| 动作 | 键盘 | 触屏 |
+| --- | --- | --- |
+| 移动 | `WASD` 或方向键 | 左侧方向按钮 |
+| 冲刺 | `Space` | 冲刺按钮 |
+| 发光 | `R` | 发光按钮 |
+| 觉醒 | `Q` | 觉醒按钮 |
+| 暂停 / 继续 | `P`、`Esc`、`Enter` 或界面按钮 | 界面按钮 |
+
+## 安装与运行
+
+要求：Node.js `>=22.13.0` 和 npm。
 
 ```bash
-npm install
+git clone <你的仓库地址>
+cd glow-thief
+npm ci
 npm run dev
+```
+
+开发服务器启动后，打开终端中显示的本地地址。生产构建与本地生产启动：
+
+```bash
 npm run build
+npm start
 ```
 
-This starter does not use `wrangler.jsonc`.
+如需部署并生成正确的社交分享绝对地址，可复制 `.env.example` 为 `.env.local`，并设置 `NEXT_PUBLIC_SITE_URL`。本地运行游戏不需要环境变量。
 
-## Included Shape
+## 开发
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+- `app/page.tsx`：游戏状态、输入、Canvas 绘制、碰撞、计分与程序化音效。
+- `app/globals.css`：界面、响应式布局和触屏控件样式。
+- `app/layout.tsx`：页面及社交分享元数据。
+- `worker/`、`build/`、`vite.config.ts`：vinext / Cloudflare Worker 构建适配。
+- `tests/`：生产构建的服务端渲染冒烟测试。
 
-## Workspace Auth Headers
+常用检查：
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+npm run lint
+npm test
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+### 已知开发 / 构建依赖风险
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+截至 2026-08-10，`npm audit --omit=dev` 报告 0 个生产依赖漏洞；完整审计仍报告 2 个 high severity 告警，均来自开发 / 构建依赖链 `vinext@0.0.50 → image-size@2.0.2`。当前自动修复会强制降级 vinext，可能破坏现有构建，因此暂不采用。项目不处理用户上传或其他不可信图片；后续升级上游依赖时应重新运行构建、测试和安全审计。详见 [SECURITY.md](./SECURITY.md)。
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+游戏运行时不需要 API Key 或后端服务。最高分仅保存在浏览器的 `localStorage` 中；音效由 Web Audio API 实时合成，不包含外部音频文件。
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+## 当前开发状态
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+已完成：
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+- 完整的单局游戏循环与难度递增
+- 键盘和触屏操作
+- 冲刺、发光、觉醒、连击和护盾系统
+- 程序化绘制、粒子效果、屏幕震动与程序化音效
+- 暂停、静音和本地最高分
 
-## Useful Commands
+仍属原型：游戏平衡、无障碍体验、浏览器兼容范围和内容量尚未达到正式发行标准。
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+## Roadmap
 
-## Learn More
+- [ ] 增加更多敌人行为与场景变化
+- [ ] 完善首次游玩引导和可访问性设置
+- [ ] 增加可配置的难度与音量选项
+- [ ] 扩充自动化测试和多浏览器测试
+- [ ] 优化低性能移动设备上的渲染表现
+- [ ] 在稳定玩法后发布 `1.0.0`
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+## 素材与版权
+
+游戏角色、场景与特效由 Canvas 代码实时绘制；音效由 Web Audio API 实时合成；没有打包音乐、第三方字体或角色素材。`public/og.png` 是带 C2PA 来源信息的 OpenAI 生成宣传图。详细来源和使用注意事项见 [ASSETS.md](./ASSETS.md)。
+
+## License
+
+代码以 [MIT License](./LICENSE) 开源。素材适用范围和来源说明见 [ASSETS.md](./ASSETS.md)，第三方开源声明见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。

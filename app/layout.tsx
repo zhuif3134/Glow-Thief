@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://glow-thief-midnight.zhui-f.chatgpt.site"),
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
+  ),
   title: "夜光小贼 · Glow Thief",
   description: "一款午夜漫画风的短局制 2D 街机游戏：偷走光，冲碎影子，把连击叠到天上。",
   openGraph: {
