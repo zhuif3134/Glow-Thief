@@ -70,7 +70,7 @@ npm test
 
 ### 已知开发 / 构建依赖风险
 
-截至 2026-08-10，`npm audit --omit=dev` 报告 0 个生产依赖漏洞；完整审计仍报告 2 个 high severity 告警，均来自开发 / 构建依赖链 `vinext@0.0.50 → image-size@2.0.2`。当前自动修复会强制降级 vinext，可能破坏现有构建，因此暂不采用。项目不处理用户上传或其他不可信图片；后续升级上游依赖时应重新运行构建、测试和安全审计。详见 [SECURITY.md](./SECURITY.md)。
+截至 2026-09-24，`npm audit --omit=dev` 报告 0 个生产依赖漏洞；完整审计仍报告 2 个 high severity 告警，均来自开发 / 构建依赖链 `vinext@0.0.50 → image-size@2.0.2`。当前自动修复会强制降级 vinext，可能破坏现有构建，因此暂不采用。项目不处理用户上传或其他不可信图片；后续升级上游依赖时应重新运行构建、测试和安全审计。详见 [SECURITY.md](./SECURITY.md)。
 
 游戏运行时不需要 API Key 或后端服务。最高分仅保存在浏览器的 `localStorage` 中；音效由 Web Audio API 实时合成，不包含外部音频文件。
 

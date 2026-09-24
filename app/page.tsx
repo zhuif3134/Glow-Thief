@@ -1237,7 +1237,7 @@ export default function Home() {
         event.preventDefault();
       }
       if (event.code === "Escape" || event.code === "KeyP") {
-        togglePause();
+        if (!event.repeat) togglePause();
         return;
       }
       if ((event.code === "Enter" || event.code === "Space") && game.status === "paused") {
